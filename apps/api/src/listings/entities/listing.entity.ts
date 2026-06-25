@@ -40,7 +40,7 @@ export class Listing {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ name: 'company_id' })
+  @Column({ type: 'varchar', name: 'company_id' })
   company_id: string;
 
   @ManyToOne(() => Company, { onDelete: 'CASCADE' })
@@ -50,12 +50,12 @@ export class Listing {
   @Column({ type: 'enum', enum: TireSegment })
   segment: TireSegment;
 
-  @Column({ length: 100 })
+  @Column({ type: 'varchar', length: 100 })
   brand: string;
 
   // ── Parsed size fields (§4.2) ─────────────────────────────────────────────
-  @Column({ length: 20, name: 'size_format' })
-  size_format: string; // metric | flotation | diagonal_inch | radial_inch
+  @Column({ type: 'varchar', length: 20, name: 'size_format' })
+  size_format: string;
 
   @Column({ type: 'numeric', precision: 8, scale: 2, name: 'size_width' })
   size_width: number;
@@ -63,41 +63,38 @@ export class Listing {
   @Column({ type: 'numeric', precision: 5, scale: 1, nullable: true, name: 'size_aspect_ratio' })
   size_aspect_ratio: number | null;
 
-  // 'R' or '-'
-  @Column({ length: 1, name: 'size_construction' })
+  @Column({ type: 'varchar', length: 1, name: 'size_construction' })
   size_construction: string;
 
   @Column({ type: 'numeric', precision: 5, scale: 1, name: 'size_rim' })
   size_rim: number;
 
-  @Column({ length: 30, name: 'size_raw' })
+  @Column({ type: 'varchar', length: 30, name: 'size_raw' })
   size_raw: string;
   // ─────────────────────────────────────────────────────────────────────────
 
-  @Column({ length: 100, nullable: true })
+  @Column({ type: 'varchar', length: 100, nullable: true })
   pattern: string | null;
 
   @Column({ type: 'integer' })
   qty: number;
 
-  // WWYY format e.g. 1423 → week 14 of 2023
-  @Column({ length: 4, nullable: true, name: 'dot_code' })
+  @Column({ type: 'varchar', length: 4, nullable: true, name: 'dot_code' })
   dot_code: string | null;
 
-  @Column({ length: 2, name: 'location_country' })
+  @Column({ type: 'varchar', length: 2, name: 'location_country' })
   location_country: string;
 
-  @Column({ length: 100, nullable: true, name: 'location_region' })
+  @Column({ type: 'varchar', length: 100, nullable: true, name: 'location_region' })
   location_region: string | null;
 
   @Column({ type: 'enum', enum: TireCondition })
   condition: TireCondition;
 
-  // Seller's internal reference price — NEVER exposed in catalogue (§5.1)
   @Column({ type: 'text', nullable: true, name: 'price_internal_encrypted' })
   price_internal_encrypted: string | null;
 
-  @Column({ length: 3, nullable: true, name: 'price_currency' })
+  @Column({ type: 'varchar', length: 3, nullable: true, name: 'price_currency' })
   price_currency: string | null;
 
   // Visibility settings (§5.2)

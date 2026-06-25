@@ -21,7 +21,7 @@ export class Offer {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ name: 'request_id' })
+  @Column({ type: 'varchar', name: 'request_id' })
   request_id: string;
 
   // One offer per request (UNIQUE enforced at DB level in migration)
@@ -33,7 +33,7 @@ export class Offer {
   @Column({ type: 'text', name: 'price_encrypted' })
   price_encrypted: string;
 
-  @Column({ length: 3, default: 'EUR' })
+  @Column({ type: 'varchar', length: 3, default: 'EUR' })
   currency: string;
 
   @Column({ type: 'text', nullable: true, name: 'terms_text' })

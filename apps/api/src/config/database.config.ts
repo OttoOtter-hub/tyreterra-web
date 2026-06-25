@@ -20,9 +20,8 @@ export const databaseConfig = (): TypeOrmModuleOptions => ({
   username: process.env.DATABASE_USER ?? 'postgres',
   password: process.env.DATABASE_PASSWORD ?? 'postgres',
   database: process.env.DATABASE_NAME ?? 'tyreterra',
+  ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
   entities: ALL_ENTITIES,
-  // In dev: auto-sync keeps schema current without running migrations manually.
-  // In prod: set synchronize=false and run migrations explicitly.
   synchronize: process.env.NODE_ENV !== 'production',
   logging: process.env.NODE_ENV === 'development',
   migrations: ['dist/migrations/*.js'],

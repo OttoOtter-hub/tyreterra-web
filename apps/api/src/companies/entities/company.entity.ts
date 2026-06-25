@@ -5,7 +5,6 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToOne,
-  OneToMany,
   JoinColumn,
 } from 'typeorm';
 import { User } from '../../auth/entities/user.entity';
@@ -16,26 +15,24 @@ export class Company {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Column({ length: 255 })
+  @Column({ type: 'varchar', length: 255 })
   name: string;
 
-  // ISO 3166-1 alpha-2
-  @Column({ length: 2, name: 'country' })
+  @Column({ type: 'varchar', length: 2, name: 'country' })
   country: string;
 
-  @Column({ length: 30, nullable: true, name: 'vat_number' })
+  @Column({ type: 'varchar', length: 30, nullable: true, name: 'vat_number' })
   vat_number: string | null;
 
-  @Column({ default: false, name: 'vat_verified' })
+  @Column({ type: 'boolean', default: false, name: 'vat_verified' })
   vat_verified: boolean;
 
   @Column({ type: 'timestamptz', nullable: true, name: 'vat_verified_at' })
   vat_verified_at: Date | null;
 
-  @Column({ length: 300, nullable: true, name: 'short_description' })
+  @Column({ type: 'varchar', length: 300, nullable: true, name: 'short_description' })
   short_description: string | null;
 
-  // Encrypted at rest — revealed only after deal Accept
   @Column({ type: 'text', nullable: true, name: 'contact_email_encrypted' })
   contact_email_encrypted: string | null;
 

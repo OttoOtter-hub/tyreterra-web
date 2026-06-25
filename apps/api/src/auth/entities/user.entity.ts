@@ -38,7 +38,7 @@ export class User {
   @Column({ type: 'enum', enum: UserStatus, default: UserStatus.PENDING })
   status: UserStatus;
 
-  @Column({ nullable: true, name: 'company_id' })
+  @Column({ type: 'varchar', nullable: true, name: 'company_id' })
   company_id: string | null;
 
   @OneToOne(() => Company, (company) => company.user)
