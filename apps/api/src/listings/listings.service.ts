@@ -1,0 +1,280 @@
+import {
+  Injectable,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Listing, ListingStatus, AllowedRoles } from './entities/listing.entity';
+import { User, UserRole } from '../auth/entities/user.entity';
+import { AuditLog } from '../audit/entities/audit-log.entity';
+import { parseTireSize, TireSizeParseError } from '../common/tire-size.parser';
+import { CreateListingDto } from './dto/create-listing.dto';
+import { UpdateListingDto } from './dto/update-listing.dto';
+import { SearchListingDto } from './dto/search-listing.dto';
+
+const LISTING_TTL_DAYS = 30;
+
+// Shape returned by the catalogue/search endpoint (§6.1 + §6.2)
+export interface CatalogueItem {
+  id: string;
+  segment: string;
+  size_raw: string;
+  size_width: number;
+  size_aspect_ratio: number | null;
+  size_construction: string;
+  size_rim: number;
+  size_format: string;
+  brand: string;
+  pattern: string | null;
+  qty: number;
+  condition: string;
+  location_country: string;
+  location_region: string | null;
+  seller_country: string | null;
+  seller_rating: number | null;   // null = "New member" (< 5 interactions)
+  created_at: Date;
+  expires_at: Date;
+}
+
+// Fields never returned in catalogue responses (§6.2)
+const HIDDEN_FIELDS: (keyof Listing)[] = ['price_internal_encrypted', 'price_currency'];
+
+@Injectable()
+export class ListingsService {
+  constructor(
+    @InjectRepository(Listing)
+    private readonly listingRepo: Repository<Listing>,
+    @InjectRepository(AuditLog)
+    private readonly auditRepo: Repository<AuditLog>,
+  ) {}
+
+  async create(dto: CreateListingDto, user: User): Promise<Listing> {
+    if (!user.company_id) {
+      throw new ForbiddenException('User has no associated company');
+    }
+
+    let parsed;
+    try {
+      parsed = parseTireSize(dto.size);
+    } catch (e) {
+      if (e instanceof TireSizeParseError) throw new BadRequestException(e.message);
+      throw e;
+    }
+
+    const expires_at = new Date();
+    expires_at.setDate(expires_at.getDate() + LISTING_TTL_DAYS);
+
+    const listing = await this.listingRepo.save(
+      this.listingRepo.create({
+        company_id: user.company_id,
+        segment: dto.segment,
+        brand: dto.brand,
+        size_format: parsed.format,
+        size_width: parsed.size_width,
+        size_aspect_ratio: parsed.size_aspect_ratio,
+        size_construction: parsed.size_construction,
+        size_rim: parsed.size_rim,
+        size_raw: parsed.size_raw,
+        pattern: dto.pattern ?? null,
+        qty: dto.qty,
+        dot_code: dto.dot_code ?? null,
+        location_country: dto.location_country.toUpperCase(),
+        location_region: dto.location_region ?? null,
+        condition: dto.condition,
+        visible_regions: dto.visible_regions ?? null,
+        exclude_own_region: dto.exclude_own_region ?? false,
+        allowed_roles: dto.allowed_roles ?? AllowedRoles.ALL,
+        status: ListingStatus.ACTIVE,
+        expires_at,
+      }),
+    );
+
+    await this.auditRepo.save(
+      this.auditRepo.create({
+        event_type: 'listing.created',
+        actor_id: user.id,
+        target_id: listing.id,
+        target_type: 'listing',
+        payload: { segment: listing.segment, size_raw: listing.size_raw, qty: listing.qty },
+      }),
+    );
+
+    return this.sanitise(listing);
+  }
+
+  async search(dto: SearchListingDto, viewer: User): Promise<{ data: CatalogueItem[]; total: number }> {
+    const page = dto.page ?? 1;
+    const limit = Math.min(dto.limit ?? 20, 100);
+
+    const qb = this.listingRepo
+      .createQueryBuilder('l')
+      .leftJoin('l.company', 'c')
+      .leftJoin('c.rating', 'r')
+      // §6.1: include seller country and rating; §6.2: never expose company name
+      .addSelect(['c.country', 'r.score', 'r.interaction_count'])
+      .where('l.status = :status', { status: ListingStatus.ACTIVE })
+      .andWhere('l.expires_at > NOW()');
+
+    // Role visibility filter (§5.2)
+    if (viewer.role === UserRole.DEALER) {
+      qb.andWhere("l.allowed_roles IN ('all', 'dealer')");
+    } else if (viewer.role === UserRole.DISTRIBUTOR) {
+      qb.andWhere("l.allowed_roles IN ('all', 'distributor')");
+    }
+
+    if (dto.segment) qb.andWhere('l.segment = :segment', { segment: dto.segment });
+    if (dto.brand) qb.andWhere('LOWER(l.brand) = LOWER(:brand)', { brand: dto.brand });
+    if (dto.condition) qb.andWhere('l.condition = :condition', { condition: dto.condition });
+    if (dto.location_country) {
+      qb.andWhere('l.location_country = :country', { country: dto.location_country.toUpperCase() });
+    }
+    if (dto.qty_min) qb.andWhere('l.qty >= :qty_min', { qty_min: dto.qty_min });
+
+    // §6.3: minimum seller rating — null score (new members) excluded when filter is set
+    if (dto.min_rating) {
+      qb.andWhere('r.score >= :min_rating', { min_rating: dto.min_rating });
+    }
+
+    // Size search on parsed components (§4.4) — prefer structured, fall back to raw
+    if (dto.size_raw) {
+      try {
+        const p = parseTireSize(dto.size_raw);
+        qb.andWhere('l.size_width = :w AND l.size_rim = :r AND l.size_construction = :c', {
+          w: p.size_width, r: p.size_rim, c: p.size_construction,
+        });
+      } catch {
+        return { data: [], total: 0 };
+      }
+    } else {
+      if (dto.size_width) qb.andWhere('l.size_width = :w', { w: dto.size_width });
+      if (dto.size_rim) qb.andWhere('l.size_rim = :r', { r: dto.size_rim });
+      if (dto.size_construction) qb.andWhere('l.size_construction = :c', { c: dto.size_construction });
+    }
+
+    const [rows, total] = await qb
+      .orderBy('l.created_at', 'DESC')
+      .skip((page - 1) * limit)
+      .take(limit)
+      .getManyAndCount();
+
+    return { data: rows.map((r) => this.toCatalogueItem(r)), total };
+  }
+
+  async findOne(id: string, viewer: User): Promise<Listing> {
+    const listing = await this.listingRepo.findOne({
+      where: { id },
+      relations: ['company'],
+    });
+    if (!listing || listing.status === ListingStatus.EXPIRED) {
+      throw new NotFoundException('Listing not found');
+    }
+    this.assertVisible(listing, viewer);
+    return this.sanitise(listing);
+  }
+
+  async update(id: string, dto: UpdateListingDto, user: User): Promise<Listing> {
+    const listing = await this.listingRepo.findOneBy({ id });
+    if (!listing) throw new NotFoundException('Listing not found');
+    if (listing.company_id !== user.company_id) throw new ForbiddenException();
+
+    Object.assign(listing, dto);
+    const saved = await this.listingRepo.save(listing);
+
+    await this.auditRepo.save(
+      this.auditRepo.create({
+        event_type: 'listing.updated',
+        actor_id: user.id,
+        target_id: listing.id,
+        target_type: 'listing',
+        payload: dto as unknown as Record<string, unknown>,
+      }),
+    );
+
+    return this.sanitise(saved);
+  }
+
+  async deactivate(id: string, user: User): Promise<{ message: string }> {
+    const listing = await this.listingRepo.findOneBy({ id });
+    if (!listing) throw new NotFoundException('Listing not found');
+    if (listing.company_id !== user.company_id) throw new ForbiddenException();
+
+    listing.status = ListingStatus.INACTIVE;
+    await this.listingRepo.save(listing);
+
+    await this.auditRepo.save(
+      this.auditRepo.create({
+        event_type: 'listing.deactivated',
+        actor_id: user.id,
+        target_id: listing.id,
+        target_type: 'listing',
+        payload: {},
+      }),
+    );
+
+    return { message: 'Listing deactivated' };
+  }
+
+  async renew(id: string, user: User): Promise<Listing> {
+    const listing = await this.listingRepo.findOneBy({ id });
+    if (!listing) throw new NotFoundException('Listing not found');
+    if (listing.company_id !== user.company_id) throw new ForbiddenException();
+
+    const expires_at = new Date();
+    expires_at.setDate(expires_at.getDate() + LISTING_TTL_DAYS);
+    listing.expires_at = expires_at;
+    listing.status = ListingStatus.ACTIVE;
+    const saved = await this.listingRepo.save(listing);
+
+    return this.sanitise(saved);
+  }
+
+  private toCatalogueItem(l: Listing): CatalogueItem {
+    const rating = (l.company as unknown as { rating?: { score?: number | null; interaction_count?: number } })?.rating;
+    return {
+      id: l.id,
+      segment: l.segment,
+      size_raw: l.size_raw,
+      size_width: l.size_width,
+      size_aspect_ratio: l.size_aspect_ratio,
+      size_construction: l.size_construction,
+      size_rim: l.size_rim,
+      size_format: l.size_format,
+      brand: l.brand,
+      pattern: l.pattern,
+      qty: l.qty,
+      condition: l.condition,
+      location_country: l.location_country,
+      location_region: l.location_region,
+      seller_country: l.company?.country ?? null,
+      seller_rating: rating?.score ?? null,
+      created_at: l.created_at,
+      expires_at: l.expires_at,
+    };
+  }
+
+  // Strips price and other hidden fields before returning to callers (§6.2)
+  private sanitise(listing: Listing): Listing {
+    const copy = { ...listing } as Record<string, unknown>;
+    for (const f of HIDDEN_FIELDS) delete copy[f];
+    return copy as unknown as Listing;
+  }
+
+  private assertVisible(listing: Listing, viewer: User): void {
+    if (
+      listing.allowed_roles === AllowedRoles.DEALER &&
+      viewer.role !== UserRole.DEALER &&
+      viewer.role !== UserRole.ADMIN
+    ) {
+      throw new ForbiddenException();
+    }
+    if (
+      listing.allowed_roles === AllowedRoles.DISTRIBUTOR &&
+      viewer.role !== UserRole.DISTRIBUTOR &&
+      viewer.role !== UserRole.ADMIN
+    ) {
+      throw new ForbiddenException();
+    }
+  }
+}
