@@ -14,8 +14,13 @@ import {
 } from 'class-validator';
 import { TireSegment, TireCondition, AllowedRoles } from '../entities/listing.entity';
 
-// Size is omitted — it is immutable after creation (would invalidate search indices)
 export class UpdateListingDto {
+  // Size re-parses size_width/size_rim/size_construction when provided
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(30)
+  size?: string;
   @IsOptional()
   @IsEnum(TireSegment)
   segment?: TireSegment;
@@ -30,6 +35,11 @@ export class UpdateListingDto {
   @IsString()
   @MaxLength(100)
   pattern?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  sku?: string;
 
   @IsOptional()
   @IsString()

@@ -6,6 +6,8 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { api } from '../../lib/api';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
+
 interface Kpi { activeListings: number; pendingUsers: number; requestsToday: number; dealsThisWeek: number; newSignupsToday: number; }
 
 function KpiCard({ label, value, accent }: { label: string; value: number; accent?: boolean }) {
@@ -52,6 +54,16 @@ export default function AdminDashboardPage() {
         <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
           <Link href="/admin/users" className="btn btn-primary">User approval queue</Link>
           <Link href="/admin/audit" className="btn btn-secondary">Audit log</Link>
+          <button className="btn btn-secondary" onClick={() => {
+            const token = localStorage.getItem('tt_token');
+            fetch(`${API_BASE}/admin/listings/export`, { headers: { Authorization: `Bearer ${token}` } })
+              .then(r => r.blob()).then(blob => {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'all-listings.xlsx'; a.click();
+                URL.revokeObjectURL(url);
+              });
+          }}>⬇ Export all listings (Excel)</button>
         </div>
       </div>
     </>

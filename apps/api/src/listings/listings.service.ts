@@ -8,8 +8,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Listing, ListingStatus, AllowedRoles } from './entities/listing.entity';
 import { User, UserRole } from '../auth/entities/user.entity';
-import { AuditLog } from '../audit/entities/audit-log.entity';
 import { parseTireSize, TireSizeParseError } from '../common/tire-size.parser';
+import { AuditLog } from '../audit/entities/audit-log.entity';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
 import { SearchListingDto } from './dto/search-listing.dto';
@@ -187,9 +187,30 @@ export class ListingsService {
   async update(id: string, dto: UpdateListingDto, user: User): Promise<Listing> {
     const listing = await this.listingRepo.findOneBy({ id });
     if (!listing) throw new NotFoundException('Listing not found');
-    if (listing.company_id !== user.company_id) throw new ForbiddenException();
 
-    Object.assign(listing, dto);
+    const isAdmin = user.role === UserRole.ADMIN;
+    if (!isAdmin && listing.company_id !== user.company_id) throw new ForbiddenException();
+
+    const { size, ...rest } = dto;
+
+    // Re-parse size if provided
+    if (size) {
+      let parsed;
+      try {
+        parsed = parseTireSize(size);
+      } catch (e) {
+        if (e instanceof TireSizeParseError) throw new BadRequestException(e.message);
+        throw e;
+      }
+      listing.size_format = parsed.format;
+      listing.size_width = parsed.size_width;
+      listing.size_aspect_ratio = parsed.size_aspect_ratio;
+      listing.size_construction = parsed.size_construction;
+      listing.size_rim = parsed.size_rim;
+      listing.size_raw = parsed.size_raw;
+    }
+
+    Object.assign(listing, rest);
     const saved = await this.listingRepo.save(listing);
 
     await this.auditRepo.save(

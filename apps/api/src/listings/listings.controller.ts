@@ -1,17 +1,13 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Patch,
-  Delete,
-  Body,
-  Param,
-  Query,
-  UseGuards,
-  Request,
-  ParseUUIDPipe,
+  Controller, Get, Post, Patch, Delete, Body, Param, Query,
+  UseGuards, Request, ParseUUIDPipe, Res, UseInterceptors, UploadedFile, BadRequestException,
 } from '@nestjs/common';
+import { Response } from 'express';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import { ListingsService } from './listings.service';
+import { ListingsExportService } from './listings-export.service';
+import { ListingsImportService } from './listings-import.service';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
 import { SearchListingDto } from './dto/search-listing.dto';
@@ -21,7 +17,11 @@ import { User } from '../auth/entities/user.entity';
 @Controller('listings')
 @UseGuards(JwtAuthGuard)
 export class ListingsController {
-  constructor(private readonly listingsService: ListingsService) {}
+  constructor(
+    private readonly listingsService: ListingsService,
+    private readonly exportService: ListingsExportService,
+    private readonly importService: ListingsImportService,
+  ) {}
 
   @Post()
   create(@Body() dto: CreateListingDto, @Request() req: { user: User }) {
@@ -31,6 +31,36 @@ export class ListingsController {
   @Get('mine')
   findMine(@Request() req: { user: User }) {
     return this.listingsService.findMine(req.user);
+  }
+
+  @Get('export')
+  async export(@Request() req: { user: User }, @Res() res: Response) {
+    const buf = await this.exportService.exportForUser(req.user.company_id!);
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="my-listings.xlsx"',
+    });
+    res.send(buf);
+  }
+
+  @Get('import/template')
+  async template(@Res() res: Response) {
+    const buf = await this.exportService.buildTemplate();
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="tyreterra-import-template.xlsx"',
+    });
+    res.send(buf);
+  }
+
+  @Post('import')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }))
+  async import(
+    @UploadedFile() file: Express.Multer.File,
+    @Request() req: { user: User },
+  ) {
+    if (!file) throw new BadRequestException('No file provided');
+    return this.importService.importFromBuffer(file.buffer, req.user);
   }
 
   @Get()

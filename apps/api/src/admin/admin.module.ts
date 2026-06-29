@@ -8,6 +8,7 @@ import { Listing } from '../listings/entities/listing.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { RatingsModule } from '../ratings/ratings.module';
 import { EmailService } from '../common/email.service';
+import { ListingsExportService } from '../listings/listings-export.service';
 
 @Module({
   imports: [
@@ -15,6 +16,6 @@ import { EmailService } from '../common/email.service';
     RatingsModule,
   ],
   controllers: [AdminController],
-  providers: [AdminService, EmailService],
+  providers: [AdminService, EmailService, ListingsExportService],
 })
 export class AdminModule {}

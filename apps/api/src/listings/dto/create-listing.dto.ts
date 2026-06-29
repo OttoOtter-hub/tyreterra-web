@@ -34,6 +34,11 @@ export class CreateListingDto {
   @MaxLength(100)
   pattern?: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  sku?: string;
+
   // TBR: steer|drive|trailer|all_position  PCR: summer|winter_friction|winter_stud|all_season  MH: pneumatic|solid
   @IsOptional()
   @IsString()

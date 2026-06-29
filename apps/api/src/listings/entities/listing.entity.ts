@@ -75,6 +75,9 @@ export class Listing {
   size_raw: string;
   // ─────────────────────────────────────────────────────────────────────────
 
+  @Column({ type: 'varchar', length: 100, nullable: true, name: 'sku' })
+  sku: string | null;
+
   // Subtype per segment: TBR→steer/drive/trailer/all_position, PCR→summer/winter_friction/winter_stud/all_season, MH→pneumatic/solid
   @Column({ type: 'varchar', length: 30, nullable: true, name: 'tire_type' })
   tire_type: string | null;

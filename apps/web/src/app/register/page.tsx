@@ -2,14 +2,8 @@
 import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import CountrySelect from '../../components/CountrySelect';
 import { api } from '../../lib/api';
-
-const EU_COUNTRIES = [
-  'AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE',
-  'IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE',
-  'IS','LI','NO', // EEA non-EU
-  'CH','GB', // non-EU optional
-];
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -89,10 +83,12 @@ export default function RegisterPage() {
             </div>
             <div className="form-group">
               <label>Country *</label>
-              <select className="form-control" value={form.country} onChange={set('country')} required>
-                <option value="">Select country…</option>
-                {EU_COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              <CountrySelect
+                value={form.country}
+                onChange={v => setForm(f => ({ ...f, country: v }))}
+                placeholder="Search country…"
+                required
+              />
             </div>
             <div className="form-group">
               <label>VAT number (optional for non-EU)</label>

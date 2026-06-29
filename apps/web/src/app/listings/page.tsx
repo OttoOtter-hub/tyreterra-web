@@ -4,8 +4,10 @@ import Link from 'next/link';
 import Navbar from '../../components/Navbar';
 import { api } from '../../lib/api';
 
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
+
 interface Listing {
-  id: string; segment: string; size_raw: string; brand: string;
+  id: string; segment: string; size_raw: string; brand: string; sku: string | null;
   qty: number; condition: string; status: string; expires_at: string; created_at: string;
 }
 
@@ -29,7 +31,20 @@ export default function MyListingsPage() {
       <div className="container page">
         <div className="page-header">
           <h1>My Listings</h1>
-          <Link href="/listings/new" className="btn btn-primary">+ New listing</Link>
+          <div style={{ display: 'flex', gap: '.5rem', flexWrap: 'wrap' }}>
+            <button className="btn btn-secondary" onClick={() => {
+              const token = localStorage.getItem('tt_token');
+              fetch(`${API_BASE}/listings/export`, { headers: { Authorization: `Bearer ${token}` } })
+                .then(r => r.blob()).then(blob => {
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url; a.download = 'my-listings.xlsx'; a.click();
+                  URL.revokeObjectURL(url);
+                });
+            }}>⬇ Export Excel</button>
+            <Link href="/listings/import" className="btn btn-secondary">⬆ Import</Link>
+            <Link href="/listings/new" className="btn btn-primary">+ New listing</Link>
+          </div>
         </div>
 
         {loading && <div className="loading">Loading…</div>}
@@ -47,7 +62,7 @@ export default function MyListingsPage() {
             <table className="table">
               <thead>
                 <tr>
-                  <th>Size</th><th>Brand</th><th>Segment</th>
+                  <th>Size</th><th>Brand</th><th>SKU</th><th>Segment</th>
                   <th>Qty</th><th>Condition</th><th>Status</th><th>Expires</th><th></th>
                 </tr>
               </thead>
@@ -56,12 +71,14 @@ export default function MyListingsPage() {
                   <tr key={l.id}>
                     <td><strong>{l.size_raw}</strong></td>
                     <td>{l.brand}</td>
+                    <td style={{ fontSize: '.8rem', color: '#6b7280' }}>{l.sku ?? '—'}</td>
                     <td><span className={`badge badge-${l.segment.toLowerCase()}`}>{l.segment}</span></td>
                     <td>{l.qty}</td>
                     <td>{l.condition}</td>
                     <td><span className={`badge badge-${l.status}`}>{l.status}</span></td>
                     <td style={{ fontSize: '.8rem', color: '#6b7280' }}>{new Date(l.expires_at).toLocaleDateString()}</td>
-                    <td>
+                    <td style={{ display: 'flex', gap: '.4rem' }}>
+                      <Link href={`/listings/${l.id}/edit`} className="btn btn-secondary btn-sm">Edit</Link>
                       {l.status === 'active' && (
                         <button className="btn btn-secondary btn-sm" onClick={() => deactivate(l.id)}>
                           Deactivate

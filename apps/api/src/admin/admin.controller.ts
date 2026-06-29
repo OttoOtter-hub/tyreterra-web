@@ -1,8 +1,10 @@
 import {
   Controller, Get, Post, Patch, Delete, Body, Param, Query,
-  UseGuards, Request, ParseUUIDPipe,
+  UseGuards, Request, ParseUUIDPipe, Res,
 } from '@nestjs/common';
+import { Response } from 'express';
 import { AdminService } from './admin.service';
+import { ListingsExportService } from '../listings/listings-export.service';
 import { ApproveUserDto } from './dto/approve-user.dto';
 import { SetRoleDto } from './dto/set-role.dto';
 import { AuditLogQueryDto } from './dto/audit-log-query.dto';
@@ -13,7 +15,10 @@ import { User } from '../auth/entities/user.entity';
 @Controller('admin')
 @UseGuards(JwtAuthGuard, AdminGuard)
 export class AdminController {
-  constructor(private readonly adminService: AdminService) {}
+  constructor(
+    private readonly adminService: AdminService,
+    private readonly exportService: ListingsExportService,
+  ) {}
 
   // ── KPI Dashboard ────────────────────────────────────────────────────────
   @Get('dashboard')
@@ -59,6 +64,17 @@ export class AdminController {
   @Delete('listings/:id')
   removeListing(@Param('id', ParseUUIDPipe) id: string, @Request() req: { user: User }) {
     return this.adminService.removeListing(id, req.user);
+  }
+
+  // ── Export all listings ──────────────────────────────────────────────────
+  @Get('listings/export')
+  async exportAll(@Res() res: Response) {
+    const buf = await this.exportService.exportAll();
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': 'attachment; filename="all-listings.xlsx"',
+    });
+    res.send(buf);
   }
 
   // ── VAT override ─────────────────────────────────────────────────────────
