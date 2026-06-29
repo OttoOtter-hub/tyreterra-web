@@ -2,11 +2,15 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Navbar from '../../components/Navbar';
+import TireInfo, { TireListing } from '../../components/TireInfo';
 import { api } from '../../lib/api';
 
 interface TireRequest {
-  id: string; qty_requested: number; status: string; created_at: string;
-  listing?: { size_raw: string; brand: string; segment: string };
+  id: string;
+  qty_requested: number;
+  status: string;
+  created_at: string;
+  listing?: TireListing & { id: string };
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -45,7 +49,8 @@ export default function RequestsPage() {
               onClick={() => setTab(t)}>
               {t.charAt(0).toUpperCase() + t.slice(1)}
               {t === 'incoming' && incoming.length > 0 && (
-                <span style={{ background: '#fff', color: '#1a56db', borderRadius: 999, padding: '0 5px', fontSize: '.75rem', marginLeft: '.25rem' }}>
+                <span style={{ background: '#fff', color: '#1a56db', borderRadius: 999,
+                  padding: '0 5px', fontSize: '.75rem', marginLeft: '.25rem' }}>
                   {incoming.filter(r => r.status === 'pending').length}
                 </span>
               )}
@@ -54,34 +59,30 @@ export default function RequestsPage() {
         </div>
 
         {loading && <div className="loading">Loading…</div>}
-
-        {!loading && rows.length === 0 && (
-          <div className="empty"><h3>No {tab} requests</h3></div>
-        )}
+        {!loading && rows.length === 0 && <div className="empty"><h3>No {tab} requests</h3></div>}
 
         {!loading && rows.length > 0 && (
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <table className="table">
-              <thead>
-                <tr><th>Listing</th><th>Qty</th><th>Status</th><th>Date</th><th></th></tr>
-              </thead>
-              <tbody>
-                {rows.map(r => (
-                  <tr key={r.id}>
-                    <td>
-                      <strong>{r.listing?.size_raw ?? '—'}</strong>
-                      {r.listing && <span style={{ color: '#6b7280', marginLeft: '.5rem', fontSize: '.85rem' }}>{r.listing.brand}</span>}
-                    </td>
-                    <td>{r.qty_requested}</td>
-                    <td><StatusBadge status={r.status} /></td>
-                    <td style={{ fontSize: '.8rem', color: '#6b7280' }}>{new Date(r.created_at).toLocaleDateString()}</td>
-                    <td>
-                      <Link href={`/requests/${r.id}`} className="btn btn-secondary btn-sm">View</Link>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '.75rem' }}>
+            {rows.map(r => (
+              <div key={r.id} className="card" style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                {/* Tire info */}
+                <div style={{ flex: 1 }}>
+                  {r.listing
+                    ? <TireInfo listing={r.listing} qty={r.qty_requested} />
+                    : <span style={{ color: '#6b7280' }}>—</span>}
+                </div>
+
+                {/* Meta */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
+                  gap: '.5rem', flexShrink: 0, minWidth: 120 }}>
+                  <StatusBadge status={r.status} />
+                  <span style={{ fontSize: '.78rem', color: '#9ca3af' }}>
+                    {new Date(r.created_at).toLocaleDateString()}
+                  </span>
+                  <Link href={`/requests/${r.id}`} className="btn btn-secondary btn-sm">View →</Link>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

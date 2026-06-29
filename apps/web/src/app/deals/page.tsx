@@ -2,11 +2,20 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Navbar from '../../components/Navbar';
+import TireInfo, { TireListing } from '../../components/TireInfo';
 import { api } from '../../lib/api';
 
 interface Deal {
-  id: string; accepted_at: string;
-  offer?: { request?: { listing?: { size_raw: string; brand: string } } };
+  id: string;
+  accepted_at: string;
+  offer?: {
+    price?: number;
+    currency?: string;
+    request?: {
+      qty_requested?: number;
+      listing?: TireListing;
+    };
+  };
 }
 
 export default function DealsPage() {
@@ -30,30 +39,35 @@ export default function DealsPage() {
         )}
 
         {!loading && deals.length > 0 && (
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <table className="table">
-              <thead>
-                <tr><th>Tire</th><th>Accepted</th><th></th></tr>
-              </thead>
-              <tbody>
-                {deals.map(d => {
-                  const listing = d.offer?.request?.listing;
-                  return (
-                    <tr key={d.id}>
-                      <td><strong>{listing?.size_raw ?? '—'}</strong> {listing?.brand ?? ''}</td>
-                      <td style={{ fontSize: '.85rem', color: '#6b7280' }}>
-                        {new Date(d.accepted_at).toLocaleDateString()}
-                      </td>
-                      <td>
-                        <Link href={`/deals/${d.id}`} className="btn btn-secondary btn-sm">
-                          Open chat →
-                        </Link>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '.75rem' }}>
+            {deals.map(d => {
+              const listing = d.offer?.request?.listing;
+              const qty = d.offer?.request?.qty_requested;
+              return (
+                <div key={d.id} className="card" style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
+                  <div style={{ flex: 1 }}>
+                    {listing
+                      ? <TireInfo listing={listing} qty={qty} />
+                      : <span style={{ color: '#6b7280' }}>—</span>}
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
+                    gap: '.5rem', flexShrink: 0, minWidth: 130 }}>
+                    {d.offer?.price != null && (
+                      <span style={{ fontWeight: 600, color: '#059669', fontSize: '.9rem' }}>
+                        {d.offer.price.toLocaleString()} {d.offer.currency ?? 'EUR'}
+                      </span>
+                    )}
+                    <span style={{ fontSize: '.78rem', color: '#9ca3af' }}>
+                      {new Date(d.accepted_at).toLocaleDateString()}
+                    </span>
+                    <Link href={`/deals/${d.id}`} className="btn btn-secondary btn-sm">
+                      Open chat →
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

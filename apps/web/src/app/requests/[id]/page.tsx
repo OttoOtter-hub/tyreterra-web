@@ -2,13 +2,14 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Navbar from '../../../components/Navbar';
+import TireInfo, { TireListing } from '../../../components/TireInfo';
 import { useAuth } from '../../../contexts/AuthContext';
 import { api } from '../../../lib/api';
 
 interface RequestDetail {
   id: string; qty_requested: number; comment: string | null; status: string;
   buyer_company_id: string;
-  listing: { id: string; size_raw: string; brand: string; segment: string; company_id: string };
+  listing: TireListing & { id: string; company_id: string };
   offer?: { price: number; currency: string; terms_text: string | null; status: string } | null;
   listing_price?: number | null;
   listing_currency?: string | null;
@@ -57,7 +58,7 @@ export default function RequestDetailPage() {
       <Navbar />
       <div className="container page" style={{ maxWidth: 640 }}>
         <div className="page-header">
-          <h1>Request — {req.listing.size_raw}</h1>
+          <h1>{req.listing.brand} {req.listing.size_raw}</h1>
           <span className={`badge badge-${req.status === 'accepted' ? 'new' : req.status === 'pending' ? 'pending' : 'blocked'}`}>{req.status}</span>
         </div>
 
@@ -72,9 +73,12 @@ export default function RequestDetailPage() {
         )}
 
         <div className="card" style={{ marginBottom: '1rem' }}>
-          <p><strong>Listing:</strong> {req.listing.brand} {req.listing.size_raw} [{req.listing.segment}]</p>
-          <p><strong>Quantity requested:</strong> {req.qty_requested}</p>
-          {req.comment && <p><strong>Comment:</strong> {req.comment}</p>}
+          <TireInfo listing={req.listing} qty={req.qty_requested} />
+          {req.comment && (
+            <div style={{ marginTop: '.75rem', paddingTop: '.75rem', borderTop: '1px solid #f3f4f6', fontSize: '.9rem', color: '#374151' }}>
+              <strong>Comment:</strong> {req.comment}
+            </div>
+          )}
         </div>
 
         {/* Seller: pending → send offer or decline */}

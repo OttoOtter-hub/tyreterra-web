@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, FormEvent } from 'react';
 import { useParams } from 'next/navigation';
 import Navbar from '../../../components/Navbar';
+import TireInfo, { TireListing } from '../../../components/TireInfo';
 import { useAuth } from '../../../contexts/AuthContext';
 import { api } from '../../../lib/api';
 
@@ -21,7 +22,8 @@ interface Deal {
   offer?: {
     request?: {
       buyer_company_id: string;
-      listing?: { size_raw: string; brand: string; company_id: string };
+      qty_requested?: number;
+      listing?: TireListing & { company_id: string };
     };
   };
 }
@@ -101,7 +103,8 @@ export default function DealChatPage() {
     }
   }
 
-  const listing = deal?.offer?.request?.listing;
+  const request = deal?.offer?.request;
+  const listing = request?.listing;
   const myCompanyId = user?.company_id;
 
   return (
@@ -112,6 +115,13 @@ export default function DealChatPage() {
           <h1>{listing ? `${listing.brand} ${listing.size_raw}` : 'Deal'}</h1>
           <span style={{ fontSize: '.85rem', color: '#6b7280' }}>In-deal chat</span>
         </div>
+
+        {/* Tire summary card */}
+        {listing && (
+          <div className="card" style={{ marginBottom: '1rem', padding: '.75rem 1rem' }}>
+            <TireInfo listing={listing} qty={request?.qty_requested} />
+          </div>
+        )}
 
         {error && <div className="alert alert-error" style={{ marginBottom: '.75rem' }}>{error}</div>}
 
