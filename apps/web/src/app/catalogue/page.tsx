@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import Navbar from '../../components/Navbar';
 import ListingCard from '../../components/ListingCard';
+import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../lib/api';
 
 const SEGMENTS = ['', 'TBR', 'PCR', 'OTR', 'AGRI', 'MH'];
@@ -32,6 +33,7 @@ interface SearchResult {
 }
 
 export default function CataloguePage() {
+  const { user } = useAuth();
   const [results, setResults] = useState<SearchResult>({ data: [], total: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -130,7 +132,7 @@ export default function CataloguePage() {
 
         {!loading && results.data.length > 0 && (
           <div className="listing-grid">
-            {results.data.map(l => <ListingCard key={l.id} listing={l} />)}
+            {results.data.map(l => <ListingCard key={l.id} listing={l} myCompanyId={user?.company_id} />)}
           </div>
         )}
       </div>

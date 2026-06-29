@@ -20,6 +20,7 @@ const LISTING_TTL_DAYS = 30;
 // Shape returned by the catalogue/search endpoint (§6.1 + §6.2)
 export interface CatalogueItem {
   id: string;
+  company_id: string;
   segment: string;
   tire_type: string | null;
   size_raw: string;
@@ -353,6 +354,7 @@ export class ListingsService {
     const rating = (l.company as unknown as { rating?: { score?: number | null; interaction_count?: number } })?.rating;
     return {
       id: l.id,
+      company_id: l.company_id,
       segment: l.segment,
       size_raw: l.size_raw,
       size_width: l.size_width,

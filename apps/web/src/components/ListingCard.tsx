@@ -1,9 +1,11 @@
 'use client';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { countryByCode } from '../lib/countries';
 
 interface Listing {
   id: string;
+  company_id?: string;
   segment: string;
   tire_type: string | null;
   size_raw: string;
@@ -55,21 +57,28 @@ function Pill({ children, color = '#f3f4f6', textColor = '#374151' }: { children
   );
 }
 
-export default function ListingCard({ listing }: { listing: Listing }) {
+export default function ListingCard({ listing, myCompanyId }: { listing: Listing; myCompanyId?: string | null }) {
   const router = useRouter();
   const seg = listing.segment.toLowerCase();
+  const isOwn = !!myCompanyId && listing.company_id === myCompanyId;
   const countryName = countryByCode[listing.location_country] ?? listing.location_country;
   const originName = listing.origin_country
     ? (countryByCode[listing.origin_country] ?? listing.origin_country)
     : null;
 
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '.55rem' }}>
+    <div className="card" style={{
+      display: 'flex', flexDirection: 'column', gap: '.55rem',
+      ...(isOwn ? { background: '#f3f4f6', border: '1px solid #d1d5db' } : {}),
+    }}>
 
       {/* Top row: segment + qty */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div style={{ display: 'flex', gap: '.35rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '.35rem', flexWrap: 'wrap', alignItems: 'center' }}>
           <span className={`badge badge-${seg}`}>{listing.segment}</span>
+          {isOwn && (
+            <span style={{ fontSize: '.7rem', color: '#6b7280', fontStyle: 'italic' }}>your listing</span>
+          )}
           {listing.tire_type && (
             <Pill color="#e0f2fe" textColor="#0369a1">
               {listing.tire_type.replace(/_/g, ' ')}
@@ -106,9 +115,10 @@ export default function ListingCard({ listing }: { listing: Listing }) {
         <span style={{ fontSize: '.73rem', color: '#9ca3af' }}>{timeAgo(listing.created_at)}</span>
       </div>
 
-      <button className="btn btn-primary btn-full" onClick={() => router.push(`/catalogue/${listing.id}`)}>
-        Request Offer
-      </button>
+      {isOwn
+        ? <Link href={`/listings/${listing.id}/edit`} className="btn btn-secondary btn-full">Edit listing</Link>
+        : <button className="btn btn-primary btn-full" onClick={() => router.push(`/catalogue/${listing.id}`)}>Request Offer</button>
+      }
     </div>
   );
 }
