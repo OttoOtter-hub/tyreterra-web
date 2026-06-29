@@ -20,6 +20,7 @@ const LISTING_TTL_DAYS = 30;
 export interface CatalogueItem {
   id: string;
   segment: string;
+  tire_type: string | null;
   size_raw: string;
   size_width: number;
   size_aspect_ratio: number | null;
@@ -28,12 +29,16 @@ export interface CatalogueItem {
   size_format: string;
   brand: string;
   pattern: string | null;
+  sku: string | null;
+  load_index: string | null;
+  origin_country: string | null;
+  dot_code: string | null;
   qty: number;
   condition: string;
   location_country: string;
   location_region: string | null;
   seller_country: string | null;
-  seller_rating: number | null;   // null = "New member" (< 5 interactions)
+  seller_rating: number | null;
   created_at: Date;
   expires_at: Date;
 }
@@ -268,8 +273,13 @@ export class ListingsService {
       size_construction: l.size_construction,
       size_rim: l.size_rim,
       size_format: l.size_format,
+      tire_type: l.tire_type,
       brand: l.brand,
       pattern: l.pattern,
+      sku: l.sku,
+      load_index: l.load_index,
+      origin_country: l.origin_country,
+      dot_code: l.dot_code,
       qty: l.qty,
       condition: l.condition,
       location_country: l.location_country,

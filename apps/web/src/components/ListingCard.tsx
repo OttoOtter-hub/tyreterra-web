@@ -1,5 +1,6 @@
 'use client';
 import { useRouter } from 'next/navigation';
+import { countryByCode } from '../lib/countries';
 
 interface Listing {
   id: string;
@@ -8,12 +9,16 @@ interface Listing {
   size_raw: string;
   brand: string;
   pattern: string | null;
+  sku: string | null;
+  load_index: string | null;
+  origin_country: string | null;
+  dot_code: string | null;
   qty: number;
   condition: string;
   location_country: string;
   location_region: string | null;
   seller_country: string | null;
-  seller_rating: number | null;
+  seller_rating: number | null | undefined;
   created_at: string;
 }
 
@@ -38,49 +43,81 @@ function Stars({ score }: { score: number | null | undefined }) {
   );
 }
 
+function Pill({ children, color = '#f3f4f6', textColor = '#374151' }: { children: React.ReactNode; color?: string; textColor?: string }) {
+  return (
+    <span style={{
+      display: 'inline-block', padding: '.15rem .5rem', borderRadius: 999,
+      background: color, color: textColor, fontSize: '.75rem', fontWeight: 500,
+      whiteSpace: 'nowrap',
+    }}>
+      {children}
+    </span>
+  );
+}
+
 export default function ListingCard({ listing }: { listing: Listing }) {
   const router = useRouter();
   const seg = listing.segment.toLowerCase();
+  const countryName = countryByCode[listing.location_country] ?? listing.location_country;
+  const originName = listing.origin_country
+    ? (countryByCode[listing.origin_country] ?? listing.origin_country)
+    : null;
 
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '.6rem' }}>
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '.55rem' }}>
+
+      {/* Top row: segment + qty */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <span className={`badge badge-${seg}`}>{listing.segment}</span>
-        <span className="badge" style={{ background: '#f3f4f6', color: '#374151' }}>
-          {listing.qty} pcs
-        </span>
+        <div style={{ display: 'flex', gap: '.35rem', flexWrap: 'wrap' }}>
+          <span className={`badge badge-${seg}`}>{listing.segment}</span>
+          {listing.tire_type && (
+            <Pill color="#e0f2fe" textColor="#0369a1">
+              {listing.tire_type.replace(/_/g, ' ')}
+            </Pill>
+          )}
+        </div>
+        <Pill>{listing.qty} pcs</Pill>
       </div>
 
+      {/* Size + brand */}
       <div>
-        <div style={{ fontSize: '1.2rem', fontWeight: 700 }}>{listing.size_raw}</div>
-        <div style={{ color: '#6b7280', fontSize: '.9rem' }}>
-          {listing.brand}{listing.pattern ? ` · ${listing.pattern}` : ''}
+        <div style={{ fontSize: '1.2rem', fontWeight: 700, lineHeight: 1.2 }}>{listing.size_raw}</div>
+        <div style={{ color: '#374151', fontSize: '.9rem', marginTop: '.1rem' }}>
+          {listing.brand}{listing.pattern ? <span style={{ color: '#6b7280' }}> · {listing.pattern}</span> : ''}
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-        <span className={`badge badge-${listing.condition}`}>{listing.condition}</span>
-        {listing.tire_type && (
-          <span className="badge" style={{ background: '#e0f2fe', color: '#0369a1', textTransform: 'capitalize' }}>
-            {listing.tire_type.replace(/_/g, ' ')}
-          </span>
-        )}
-        <span style={{ color: '#6b7280', fontSize: '.8rem' }}>
-          {listing.seller_country ?? listing.location_country}
-        </span>
+      {/* Specs grid */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '.2rem .5rem', fontSize: '.78rem' }}>
+        <Spec label="Condition" value={listing.condition} />
+        {listing.load_index && <Spec label="Load index" value={listing.load_index} />}
+        {listing.dot_code    && <Spec label="Year" value={listing.dot_code} />}
+        {originName          && <Spec label="Origin" value={originName} />}
+        <Spec label="Location" value={listing.location_region ? `${countryName} / ${listing.location_region}` : countryName} />
+        {listing.sku && <Spec label="SKU" value={listing.sku} mono />}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '.5rem', borderTop: '1px solid #f3f4f6' }}>
+      {/* Footer: rating + age */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginTop: 'auto', paddingTop: '.5rem', borderTop: '1px solid #f3f4f6',
+      }}>
         <Stars score={listing.seller_rating} />
-        <span style={{ fontSize: '.75rem', color: '#9ca3af' }}>{timeAgo(listing.created_at)}</span>
+        <span style={{ fontSize: '.73rem', color: '#9ca3af' }}>{timeAgo(listing.created_at)}</span>
       </div>
 
-      <button
-        className="btn btn-primary btn-full"
-        onClick={() => router.push(`/catalogue/${listing.id}`)}
-      >
+      <button className="btn btn-primary btn-full" onClick={() => router.push(`/catalogue/${listing.id}`)}>
         Request Offer
       </button>
+    </div>
+  );
+}
+
+function Spec({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '.05rem' }}>
+      <span style={{ color: '#9ca3af', fontSize: '.7rem', textTransform: 'uppercase', letterSpacing: '.03em' }}>{label}</span>
+      <span style={{ color: '#111827', fontFamily: mono ? 'monospace' : 'inherit', fontSize: '.8rem', fontWeight: 500 }}>{value}</span>
     </div>
   );
 }
