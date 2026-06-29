@@ -8,7 +8,7 @@ import { api } from '../../lib/api';
 export default function RegisterPage() {
   const router = useRouter();
   const [form, setForm] = useState({
-    email: '', password: '', role: 'dealer',
+    email: '', password: '',
     company_name: '', country: '', vat_number: '',
     gdpr_consent: false, tos_accepted: false,
   });
@@ -26,6 +26,7 @@ export default function RegisterPage() {
     try {
       const res = await api.post<{ message: string }>('/auth/register', {
         ...form,
+        role: 'dealer',
         vat_number: form.vat_number || undefined,
       });
       setSuccess(res.message);
@@ -69,13 +70,6 @@ export default function RegisterPage() {
               <label>Password *</label>
               <input className="form-control" type="password" value={form.password} onChange={set('password')} required />
               <p className="form-hint">Min 12 characters, 1 uppercase, 1 number</p>
-            </div>
-            <div className="form-group">
-              <label>Role *</label>
-              <select className="form-control" value={form.role} onChange={set('role')}>
-                <option value="dealer">Dealer</option>
-                <option value="distributor">Distributor</option>
-              </select>
             </div>
             <div className="form-group">
               <label>Company name *</label>

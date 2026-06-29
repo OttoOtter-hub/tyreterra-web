@@ -129,13 +129,6 @@ export class ListingsService {
       .where('l.status = :status', { status: ListingStatus.ACTIVE })
       .andWhere('l.expires_at > NOW()');
 
-    // Role visibility filter (§5.2)
-    if (viewer.role === UserRole.DEALER) {
-      qb.andWhere("l.allowed_roles IN ('all', 'dealer')");
-    } else if (viewer.role === UserRole.DISTRIBUTOR) {
-      qb.andWhere("l.allowed_roles IN ('all', 'distributor')");
-    }
-
     if (dto.segment) qb.andWhere('l.segment = :segment', { segment: dto.segment });
     if (dto.tire_type) qb.andWhere('l.tire_type = :tire_type', { tire_type: dto.tire_type });
     if (dto.brand) qb.andWhere('LOWER(l.brand) = LOWER(:brand)', { brand: dto.brand });
@@ -295,20 +288,7 @@ export class ListingsService {
     return copy as unknown as Listing;
   }
 
-  private assertVisible(listing: Listing, viewer: User): void {
-    if (
-      listing.allowed_roles === AllowedRoles.DEALER &&
-      viewer.role !== UserRole.DEALER &&
-      viewer.role !== UserRole.ADMIN
-    ) {
-      throw new ForbiddenException();
-    }
-    if (
-      listing.allowed_roles === AllowedRoles.DISTRIBUTOR &&
-      viewer.role !== UserRole.DISTRIBUTOR &&
-      viewer.role !== UserRole.ADMIN
-    ) {
-      throw new ForbiddenException();
-    }
+  private assertVisible(_listing: Listing, _viewer: User): void {
+    // Roles removed — all authenticated users see all listings
   }
 }
