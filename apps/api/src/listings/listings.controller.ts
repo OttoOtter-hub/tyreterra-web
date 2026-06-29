@@ -2,6 +2,17 @@ import {
   Controller, Get, Post, Patch, Delete, Body, Param, Query,
   UseGuards, Request, ParseUUIDPipe, Res, UseInterceptors, UploadedFile, BadRequestException,
 } from '@nestjs/common';
+import { IsArray, IsString, IsIn, ArrayMinSize } from 'class-validator';
+
+class BulkActionDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsString({ each: true })
+  ids: string[];
+
+  @IsIn(['delete', 'deactivate'])
+  action: 'delete' | 'deactivate';
+}
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { memoryStorage } from 'multer';
@@ -82,9 +93,19 @@ export class ListingsController {
     return this.listingsService.update(id, dto, req.user);
   }
 
-  @Delete(':id')
-  deactivate(@Param('id', ParseUUIDPipe) id: string, @Request() req: { user: User }) {
+  @Post('bulk-action')
+  bulkAction(@Body() dto: BulkActionDto, @Request() req: { user: User }) {
+    return this.listingsService.bulkAction(dto.ids, dto.action, req.user);
+  }
+
+  @Post(':id/deactivate')
+  deactivateOne(@Param('id', ParseUUIDPipe) id: string, @Request() req: { user: User }) {
     return this.listingsService.deactivate(id, req.user);
+  }
+
+  @Delete(':id')
+  hardDelete(@Param('id', ParseUUIDPipe) id: string, @Request() req: { user: User }) {
+    return this.listingsService.hardDelete(id, req.user);
   }
 
   @Post(':id/renew')

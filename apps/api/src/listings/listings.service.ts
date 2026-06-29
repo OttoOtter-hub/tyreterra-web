@@ -230,7 +230,8 @@ export class ListingsService {
   async deactivate(id: string, user: User): Promise<{ message: string }> {
     const listing = await this.listingRepo.findOneBy({ id });
     if (!listing) throw new NotFoundException('Listing not found');
-    if (listing.company_id !== user.company_id) throw new ForbiddenException();
+    const isAdmin = user.role === UserRole.ADMIN;
+    if (!isAdmin && listing.company_id !== user.company_id) throw new ForbiddenException();
 
     listing.status = ListingStatus.INACTIVE;
     await this.listingRepo.save(listing);
@@ -246,6 +247,53 @@ export class ListingsService {
     );
 
     return { message: 'Listing deactivated' };
+  }
+
+  async hardDelete(id: string, user: User): Promise<{ message: string }> {
+    const listing = await this.listingRepo.findOneBy({ id });
+    if (!listing) throw new NotFoundException('Listing not found');
+    const isAdmin = user.role === UserRole.ADMIN;
+    if (!isAdmin && listing.company_id !== user.company_id) throw new ForbiddenException();
+
+    await this.listingRepo.remove(listing);
+
+    await this.auditRepo.save(
+      this.auditRepo.create({
+        event_type: 'listing.deleted',
+        actor_id: user.id,
+        target_id: id,
+        target_type: 'listing',
+        payload: {},
+      }),
+    );
+
+    return { message: 'Listing deleted' };
+  }
+
+  async bulkAction(
+    ids: string[],
+    action: 'delete' | 'deactivate',
+    user: User,
+  ): Promise<{ affected: number }> {
+    if (!ids.length) return { affected: 0 };
+    const isAdmin = user.role === UserRole.ADMIN;
+
+    const listings = await this.listingRepo.findBy(
+      ids.map(id => ({ id, ...(!isAdmin ? { company_id: user.company_id! } : {}) })),
+    );
+
+    let affected = 0;
+    for (const l of listings) {
+      if (action === 'delete') {
+        await this.listingRepo.remove(l);
+      } else {
+        l.status = ListingStatus.INACTIVE;
+        await this.listingRepo.save(l);
+      }
+      affected++;
+    }
+
+    return { affected };
   }
 
   async renew(id: string, user: User): Promise<Listing> {
