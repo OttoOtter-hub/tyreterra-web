@@ -25,6 +25,9 @@ interface Listing {
   location_country: string;
   expires_at: string;
   created_at: string;
+  price?: number | null;
+  price_currency?: string | null;
+  currency?: string | null;
 }
 
 export default function MyListingsPage() {
@@ -208,6 +211,7 @@ export default function MyListingsPage() {
                   <th>Brand / Pattern</th>
                   <th>Segment / Type</th>
                   <th>SKU</th>
+                  <th>My price</th>
                   <th>Qty</th>
                   <th>Cond.</th>
                   <th>Country</th>
@@ -237,6 +241,11 @@ export default function MyListingsPage() {
                     </td>
                     <td style={{ fontSize: '.8rem', color: '#6b7280', fontFamily: 'monospace' }}>
                       {l.sku ?? '—'}
+                    </td>
+                    <td style={{ fontSize: '.85rem', fontWeight: 500 }}>
+                      {l.price != null
+                        ? `${l.price.toLocaleString()} ${l.currency ?? l.price_currency ?? 'EUR'}`
+                        : <span style={{ color: '#d1d5db' }}>—</span>}
                     </td>
                     <td>{l.qty}</td>
                     <td>{l.condition}</td>

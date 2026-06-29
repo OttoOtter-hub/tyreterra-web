@@ -34,6 +34,7 @@ interface ListingData {
   load_index: string | null; origin_country: string | null; dot_code: string | null;
   qty: number; condition: string; location_country: string; location_region: string | null;
   exclude_own_region: boolean; allowed_roles: string;
+  price?: number | null; currency?: string | null;
 }
 
 export default function EditListingPage() {
@@ -46,7 +47,7 @@ export default function EditListingPage() {
     segment: 'TBR', tire_type: '', brand: '', size: '', pattern: '',
     sku: '', load_index: '', origin_country: '', production_year: '',
     qty: '', condition: 'new', location_country: '', location_region: '',
-    exclude_own_region: false,
+    price: '', currency: 'EUR', exclude_own_region: false,
   });
 
   useEffect(() => {
@@ -66,6 +67,8 @@ export default function EditListingPage() {
           condition: l.condition,
           location_country: l.location_country,
           location_region: l.location_region ?? '',
+          price: l.price != null ? String(l.price) : '',
+          currency: l.currency ?? 'EUR',
           exclude_own_region: l.exclude_own_region,
         });
       })
@@ -93,6 +96,8 @@ export default function EditListingPage() {
         size: form.size || undefined,
         pattern: form.pattern || undefined,
         sku: form.sku || undefined,
+        price: form.price ? parseFloat(form.price) : undefined,
+        currency: form.price ? form.currency : undefined,
         load_index: form.load_index || undefined,
         origin_country: form.origin_country || undefined,
         dot_code: form.production_year || undefined,
@@ -154,6 +159,20 @@ export default function EditListingPage() {
               <div className="form-group">
                 <label>SKU</label>
                 <input className="form-control" value={form.sku} onChange={set('sku')} placeholder="Your article number" maxLength={100} />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label>My price <span style={{ color: '#6b7280', fontWeight: 400, fontSize: '.8rem' }}>(private)</span></label>
+                  <input className="form-control" type="number" min={0} step={0.01}
+                    value={form.price} onChange={set('price')} placeholder="0.00" />
+                </div>
+                <div className="form-group">
+                  <label>Currency</label>
+                  <select className="form-control" value={form.currency} onChange={set('currency')}>
+                    <option>EUR</option><option>USD</option><option>GBP</option>
+                  </select>
+                </div>
               </div>
 
               <div className="form-group">

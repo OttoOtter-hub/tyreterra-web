@@ -5,11 +5,12 @@ import { RequestsController } from './requests.controller';
 import { Request } from './entities/request.entity';
 import { Listing } from '../listings/entities/listing.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
+import { EncryptionService } from '../common/encryption.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Request, Listing, AuditLog])],
   controllers: [RequestsController],
-  providers: [RequestsService],
+  providers: [RequestsService, EncryptionService],
   exports: [RequestsService],
 })
 export class RequestsModule {}

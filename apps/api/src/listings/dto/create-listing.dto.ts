@@ -5,6 +5,8 @@ import {
   IsInt,
   IsBoolean,
   IsArray,
+  IsNumber,
+  IsPositive,
   Min,
   MaxLength,
   MinLength,
@@ -33,6 +35,17 @@ export class CreateListingDto {
   @IsString()
   @MaxLength(100)
   pattern?: string;
+
+  // Internal recommended price — encrypted at rest, only visible to the listing owner
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  price?: number;
+
+  @IsOptional()
+  @IsString()
+  @Length(3, 3)
+  currency?: string;
 
   @IsOptional()
   @IsString()

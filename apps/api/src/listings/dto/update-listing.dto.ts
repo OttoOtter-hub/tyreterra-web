@@ -5,6 +5,8 @@ import {
   IsInt,
   IsBoolean,
   IsArray,
+  IsNumber,
+  IsPositive,
   Min,
   MaxLength,
   MinLength,
@@ -35,6 +37,16 @@ export class UpdateListingDto {
   @IsString()
   @MaxLength(100)
   pattern?: string;
+
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @IsPositive()
+  price?: number;
+
+  @IsOptional()
+  @IsString()
+  @Length(3, 3)
+  currency?: string;
 
   @IsOptional()
   @IsString()

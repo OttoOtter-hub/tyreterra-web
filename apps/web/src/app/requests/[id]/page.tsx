@@ -10,6 +10,8 @@ interface RequestDetail {
   buyer_company_id: string;
   listing: { id: string; size_raw: string; brand: string; segment: string; company_id: string };
   offer?: { price: number; currency: string; terms_text: string | null; status: string } | null;
+  listing_price?: number | null;
+  listing_currency?: string | null;
 }
 
 export default function RequestDetailPage() {
@@ -79,17 +81,36 @@ export default function RequestDetailPage() {
         {isSeller && req.status === 'pending' && (
           <div className="card">
             <h3 style={{ marginBottom: '1rem' }}>Respond to request</h3>
-            <div className="form-group">
-              <label>Price *</label>
-              <input className="form-control" type="number" min={0.01} step={0.01}
-                value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} />
-            </div>
-            <div className="form-group">
-              <label>Currency</label>
-              <select className="form-control" value={form.currency}
-                onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}>
-                <option>EUR</option><option>USD</option><option>GBP</option>
-              </select>
+
+            {/* Recommended price hint */}
+            {req.listing_price != null && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '.6rem .9rem',
+                background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 8, marginBottom: '1rem' }}>
+                <div style={{ fontSize: '.9rem' }}>
+                  <span style={{ color: '#6b7280' }}>My price: </span>
+                  <strong>{req.listing_price.toLocaleString()} {req.listing_currency ?? 'EUR'}</strong>
+                </div>
+                <button className="btn btn-secondary btn-sm" onClick={() =>
+                  setForm(f => ({ ...f, price: String(req.listing_price), currency: req.listing_currency ?? 'EUR' }))
+                }>
+                  Use this price
+                </button>
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
+              <div className="form-group">
+                <label>Price *</label>
+                <input className="form-control" type="number" min={0.01} step={0.01}
+                  value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label>Currency</label>
+                <select className="form-control" value={form.currency}
+                  onChange={e => setForm(f => ({ ...f, currency: e.target.value }))}>
+                  <option>EUR</option><option>USD</option><option>GBP</option>
+                </select>
+              </div>
             </div>
             <div className="form-group">
               <label>Terms / Notes</label>

@@ -7,11 +7,12 @@ import { ListingsImportService } from './listings-import.service';
 import { Listing } from './entities/listing.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { Company } from '../companies/entities/company.entity';
+import { EncryptionService } from '../common/encryption.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Listing, AuditLog, Company])],
   controllers: [ListingsController],
-  providers: [ListingsService, ListingsExportService, ListingsImportService],
+  providers: [ListingsService, ListingsExportService, ListingsImportService, EncryptionService],
   exports: [ListingsService, ListingsExportService],
 })
 export class ListingsModule {}

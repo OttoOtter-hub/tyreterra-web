@@ -11,6 +11,7 @@ import { Listing, ListingStatus } from '../listings/entities/listing.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { User } from '../auth/entities/user.entity';
 import { CreateRequestDto } from './dto/create-request.dto';
+import { EncryptionService } from '../common/encryption.service';
 
 @Injectable()
 export class RequestsService {
@@ -21,6 +22,7 @@ export class RequestsService {
     private readonly listingRepo: Repository<Listing>,
     @InjectRepository(AuditLog)
     private readonly auditRepo: Repository<AuditLog>,
+    private readonly encryption: EncryptionService,
   ) {}
 
   async create(dto: CreateRequestDto, buyer: User): Promise<Request> {
@@ -83,13 +85,26 @@ export class RequestsService {
     });
   }
 
-  async findOne(id: string, user: User): Promise<Request> {
+  async findOne(id: string, user: User): Promise<Request & { listing_price?: number | null; listing_currency?: string | null }> {
     const request = await this.requestRepo.findOne({
       where: { id },
       relations: ['listing', 'offer', 'offer.deal'],
     });
     if (!request) throw new NotFoundException('Request not found');
     this.assertAccess(request, user);
+
+    // If the viewer is the seller, expose decrypted listing price
+    const isSeller = user.company_id && request.listing?.company_id === user.company_id;
+    if (isSeller && request.listing?.price_internal_encrypted) {
+      let listing_price: number | null = null;
+      try {
+        listing_price = parseFloat(this.encryption.decrypt(request.listing.price_internal_encrypted));
+      } catch { listing_price = null; }
+      return Object.assign(request, {
+        listing_price,
+        listing_currency: request.listing.price_currency,
+      });
+    }
     return request;
   }
 

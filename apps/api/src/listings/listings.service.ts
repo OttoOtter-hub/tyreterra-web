@@ -9,6 +9,7 @@ import { Repository } from 'typeorm';
 import { Listing, ListingStatus, AllowedRoles } from './entities/listing.entity';
 import { User, UserRole } from '../auth/entities/user.entity';
 import { parseTireSize, TireSizeParseError } from '../common/tire-size.parser';
+import { EncryptionService } from '../common/encryption.service';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
@@ -53,6 +54,7 @@ export class ListingsService {
     private readonly listingRepo: Repository<Listing>,
     @InjectRepository(AuditLog)
     private readonly auditRepo: Repository<AuditLog>,
+    private readonly encryption: EncryptionService,
   ) {}
 
   async create(dto: CreateListingDto, user: User): Promise<Listing> {
@@ -94,6 +96,10 @@ export class ListingsService {
         condition: dto.condition,
         visible_regions: dto.visible_regions ?? null,
         exclude_own_region: dto.exclude_own_region ?? false,
+        price_internal_encrypted: dto.price != null
+          ? this.encryption.encrypt(String(dto.price))
+          : null,
+        price_currency: dto.currency ?? (dto.price != null ? 'EUR' : null),
         allowed_roles: dto.allowed_roles ?? AllowedRoles.ALL,
         status: ListingStatus.ACTIVE,
         expires_at,
@@ -113,12 +119,13 @@ export class ListingsService {
     return this.sanitise(listing);
   }
 
-  async findMine(user: User): Promise<Listing[]> {
+  async findMine(user: User): Promise<(Listing & { price?: number | null })[]> {
     if (!user.company_id) return [];
-    return this.listingRepo.find({
+    const listings = await this.listingRepo.find({
       where: { company_id: user.company_id },
       order: { created_at: 'DESC' },
     });
+    return listings.map(l => this.withDecryptedPrice(l));
   }
 
   async search(dto: SearchListingDto, viewer: User): Promise<{ data: CatalogueItem[]; total: number }> {
@@ -173,7 +180,7 @@ export class ListingsService {
     return { data: rows.map((r) => this.toCatalogueItem(r)), total };
   }
 
-  async findOne(id: string, viewer: User): Promise<Listing> {
+  async findOne(id: string, viewer: User): Promise<Listing & { price?: number | null }> {
     const listing = await this.listingRepo.findOne({
       where: { id },
       relations: ['company'],
@@ -182,7 +189,12 @@ export class ListingsService {
       throw new NotFoundException('Listing not found');
     }
     this.assertVisible(listing, viewer);
-    return this.sanitise(listing);
+    const sanitised = this.sanitise(listing);
+    // Return decrypted price only to the owner
+    if (viewer.company_id && listing.company_id === viewer.company_id) {
+      return this.withDecryptedPrice(sanitised);
+    }
+    return sanitised;
   }
 
   async update(id: string, dto: UpdateListingDto, user: User): Promise<Listing> {
@@ -211,7 +223,13 @@ export class ListingsService {
       listing.size_raw = parsed.size_raw;
     }
 
-    Object.assign(listing, rest);
+    if (rest.price != null) {
+      listing.price_internal_encrypted = this.encryption.encrypt(String(rest.price));
+      listing.price_currency = rest.currency ?? listing.price_currency ?? 'EUR';
+    }
+    // Remove virtual fields before assign to avoid TypeORM issues
+    const { price, currency, ...dbRest } = rest;
+    Object.assign(listing, dbRest);
     const saved = await this.listingRepo.save(listing);
 
     await this.auditRepo.save(
@@ -369,5 +387,17 @@ export class ListingsService {
 
   private assertVisible(_listing: Listing, _viewer: User): void {
     // Roles removed — all authenticated users see all listings
+  }
+
+  private withDecryptedPrice(listing: Listing): Listing & { price: number | null; currency: string | null } {
+    let price: number | null = null;
+    try {
+      if (listing.price_internal_encrypted) {
+        price = parseFloat(this.encryption.decrypt(listing.price_internal_encrypted));
+      }
+    } catch { price = null; }
+    // Remove encrypted field, expose plaintext price
+    const { price_internal_encrypted, ...rest } = listing as unknown as Record<string, unknown>;
+    return { ...rest, price, currency: (listing as unknown as Record<string, unknown>).price_currency as string | null } as unknown as Listing & { price: number | null; currency: string | null };
   }
 }

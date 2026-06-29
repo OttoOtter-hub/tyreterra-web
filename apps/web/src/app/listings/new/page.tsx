@@ -33,7 +33,7 @@ export default function NewListingPage() {
   const [form, setForm] = useState({
     segment: 'TBR', tire_type: '', brand: '', size: '', pattern: '', sku: '',
     qty: '', production_year: '', load_index: '', origin_country: '',
-    location_country: '', location_region: '',
+    location_country: '', location_region: '', price: '', currency: 'EUR',
     condition: 'new', exclude_own_region: false,
   });
   const [error, setError] = useState('');
@@ -65,6 +65,8 @@ export default function NewListingPage() {
         tire_type: form.tire_type || undefined,
         pattern: form.pattern || undefined,
         sku: form.sku || undefined,
+        price: form.price ? parseFloat(form.price) : undefined,
+        currency: form.price ? form.currency : undefined,
         load_index: form.load_index || undefined,
         origin_country: form.origin_country || undefined,
         dot_code: form.production_year || undefined,
@@ -152,6 +154,20 @@ export default function NewListingPage() {
                 <label>SKU</label>
                 <input className="form-control" value={form.sku} onChange={set('sku')}
                   placeholder="Your article number" maxLength={100} />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label>My price <span style={{ color: '#6b7280', fontWeight: 400, fontSize: '.8rem' }}>(private — only you see this)</span></label>
+                  <input className="form-control" type="number" min={0} step={0.01}
+                    value={form.price} onChange={set('price')} placeholder="0.00" />
+                </div>
+                <div className="form-group">
+                  <label>Currency</label>
+                  <select className="form-control" value={form.currency} onChange={set('currency')}>
+                    <option>EUR</option><option>USD</option><option>GBP</option>
+                  </select>
+                </div>
               </div>
 
               <div className="form-group">
