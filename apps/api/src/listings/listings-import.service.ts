@@ -31,7 +31,17 @@ export class ListingsImportService {
     const headers: string[] = [];
     ws.getRow(1).eachCell(cell => headers.push(String(cell.value ?? '').toLowerCase().trim().replace(/\s+/g, '_')));
 
-    const col = (name: string) => headers.indexOf(name);
+    // Returns 1-based column index, or 0 if not found (safe: ExcelJS getCell(0) returns empty cell-like object we handle via nullish)
+    const col = (name: string): number => {
+      const idx = headers.indexOf(name);
+      return idx >= 0 ? idx + 1 : 0;
+    };
+
+    const getStr = (row: ExcelJS.Row, colIdx: number): string => {
+      if (colIdx === 0) return '';
+      const cell = row.getCell(colIdx);
+      return cell?.value == null ? '' : String(cell.value).trim();
+    };
 
     const toStr = (cell: ExcelJS.Cell): string =>
       cell?.value == null ? '' : String(cell.value).trim();
@@ -46,12 +56,12 @@ export class ListingsImportService {
     ws.eachRow((row, rowNum) => {
       if (rowNum === 1) return; // skip header
 
-      const segment = toStr(row.getCell(col('segment') + 1)).toUpperCase();
-      const size    = toStr(row.getCell(col('size') + 1));
-      const brand   = toStr(row.getCell(col('brand') + 1));
-      const qtyStr  = toStr(row.getCell(col('qty') + 1));
-      const condition = toStr(row.getCell(col('condition') + 1)).toLowerCase();
-      const location_country = toStr(row.getCell(col('location_country') + 1) ?? row.getCell(col('location') + 1)).toUpperCase();
+      const segment = getStr(row, col('segment')).toUpperCase();
+      const size    = getStr(row, col('size'));
+      const brand   = getStr(row, col('brand'));
+      const qtyStr  = getStr(row, col('qty'));
+      const condition = getStr(row, col('condition')).toLowerCase();
+      const location_country = (getStr(row, col('location_country')) || getStr(row, col('location'))).toUpperCase();
 
       // Skip entirely empty rows
       if (!segment && !size && !brand && !qtyStr) return;
@@ -95,23 +105,23 @@ export class ListingsImportService {
       toCreate.push({
         company_id: user.company_id!,
         segment: segment as TireSegment,
-        tire_type: toStr(row.getCell(col('type') + 1)) || null,
+        tire_type: getStr(row, col('type')) || null,
         brand,
-        sku: toStr(row.getCell(col('sku') + 1)) || null,
+        sku: getStr(row, col('sku')) || null,
         size_format: parsed.format,
         size_width: parsed.size_width,
         size_aspect_ratio: parsed.size_aspect_ratio,
         size_construction: parsed.size_construction,
         size_rim: parsed.size_rim,
         size_raw: parsed.size_raw,
-        pattern: toStr(row.getCell(col('pattern') + 1)) || null,
-        load_index: toStr(row.getCell(col('load_index') + 1)) || null,
-        origin_country: toStr(row.getCell(col('origin_country') + 1)) || null,
-        dot_code: toStr(row.getCell(col('year') + 1)) || null,
+        pattern: getStr(row, col('pattern')) || null,
+        load_index: getStr(row, col('load_index')) || null,
+        origin_country: getStr(row, col('origin_country')) || null,
+        dot_code: getStr(row, col('year')) || null,
         qty,
         condition: condition as TireCondition,
         location_country,
-        location_region: toStr(row.getCell(col('region') + 1)) || null,
+        location_region: getStr(row, col('region')) || null,
         status: ListingStatus.ACTIVE,
         allowed_roles: AllowedRoles.ALL,
         exclude_own_region: false,
