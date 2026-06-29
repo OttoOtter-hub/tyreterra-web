@@ -10,8 +10,8 @@ class BulkActionDto {
   @IsString({ each: true })
   ids: string[];
 
-  @IsIn(['delete', 'deactivate'])
-  action: 'delete' | 'deactivate';
+  @IsIn(['delete', 'deactivate', 'activate'])
+  action: 'delete' | 'deactivate' | 'activate';
 }
 import { Response } from 'express';
 import { FileInterceptor } from '@nestjs/platform-express';
@@ -96,6 +96,11 @@ export class ListingsController {
   @Post('bulk-action')
   bulkAction(@Body() dto: BulkActionDto, @Request() req: { user: User }) {
     return this.listingsService.bulkAction(dto.ids, dto.action, req.user);
+  }
+
+  @Post(':id/activate')
+  activateOne(@Param('id', ParseUUIDPipe) id: string, @Request() req: { user: User }) {
+    return this.listingsService.activate(id, req.user);
   }
 
   @Post(':id/deactivate')

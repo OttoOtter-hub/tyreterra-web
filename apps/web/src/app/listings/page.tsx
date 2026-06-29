@@ -71,9 +71,14 @@ export default function MyListingsPage() {
     setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
 
-  async function deactivateOne(id: string) {
-    await api.post(`/listings/${id}/deactivate`, {});
-    setListings(prev => prev.map(l => l.id === id ? { ...l, status: 'inactive' } : l));
+  async function toggleStatus(id: string, current: string) {
+    if (current === 'active') {
+      await api.post(`/listings/${id}/deactivate`, {});
+      setListings(prev => prev.map(l => l.id === id ? { ...l, status: 'inactive' } : l));
+    } else {
+      await api.post(`/listings/${id}/activate`, {});
+      setListings(prev => prev.map(l => l.id === id ? { ...l, status: 'active' } : l));
+    }
   }
 
   async function deleteOne(id: string) {
@@ -83,7 +88,7 @@ export default function MyListingsPage() {
     setSelected(prev => { const n = new Set(prev); n.delete(id); return n; });
   }
 
-  async function bulkAction(action: 'deactivate' | 'delete') {
+  async function bulkAction(action: 'deactivate' | 'activate' | 'delete') {
     const ids = [...selected];
     if (!ids.length) return;
     if (action === 'delete' && !confirm(`Delete ${ids.length} listing(s) permanently?`)) return;
@@ -93,10 +98,10 @@ export default function MyListingsPage() {
       if (action === 'delete') {
         setListings(prev => prev.filter(l => !ids.includes(l.id)));
       } else {
-        setListings(prev => prev.map(l => ids.includes(l.id) ? { ...l, status: 'inactive' } : l));
+        const newStatus = action === 'activate' ? 'active' : 'inactive';
+        setListings(prev => prev.map(l => ids.includes(l.id) ? { ...l, status: newStatus } : l));
       }
       setSelected(new Set());
-      alert(`${affected} listing(s) ${action === 'delete' ? 'deleted' : 'deactivated'}.`);
     } finally {
       setActing(false);
     }
@@ -162,14 +167,17 @@ export default function MyListingsPage() {
 
         {/* Bulk action bar */}
         {someSelected && (
-          <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center', padding: '.6rem 1rem',
-            background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center', flexWrap: 'wrap',
+            padding: '.6rem 1rem', background: '#eff6ff', border: '1px solid #bfdbfe',
+            borderRadius: 8, marginBottom: '1rem' }}>
             <strong style={{ fontSize: '.9rem' }}>{selected.size} selected</strong>
             <button className="btn btn-secondary btn-sm" disabled={acting}
-              onClick={() => bulkAction('deactivate')}>Deactivate selected</button>
+              onClick={() => bulkAction('activate')}>Activate</button>
+            <button className="btn btn-secondary btn-sm" disabled={acting}
+              onClick={() => bulkAction('deactivate')}>Deactivate</button>
             <button className="btn btn-sm" disabled={acting}
               style={{ background: '#fee2e2', color: '#b91c1c', border: '1px solid #fca5a5' }}
-              onClick={() => bulkAction('delete')}>Delete selected</button>
+              onClick={() => bulkAction('delete')}>Delete</button>
             <button className="btn btn-secondary btn-sm" onClick={() => setSelected(new Set())}>Cancel</button>
           </div>
         )}
@@ -240,9 +248,10 @@ export default function MyListingsPage() {
                     <td>
                       <div style={{ display: 'flex', gap: '.3rem' }}>
                         <Link href={`/listings/${l.id}/edit`} className="btn btn-secondary btn-sm">Edit</Link>
-                        {l.status === 'active' && (
-                          <button className="btn btn-secondary btn-sm" onClick={() => deactivateOne(l.id)}>
-                            Deactivate
+                        {(l.status === 'active' || l.status === 'inactive') && (
+                          <button className="btn btn-secondary btn-sm"
+                            onClick={() => toggleStatus(l.id, l.status)}>
+                            {l.status === 'active' ? 'Deactivate' : 'Activate'}
                           </button>
                         )}
                         <button className="btn btn-sm"

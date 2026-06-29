@@ -227,6 +227,21 @@ export class ListingsService {
     return this.sanitise(saved);
   }
 
+  async activate(id: string, user: User): Promise<{ message: string }> {
+    const listing = await this.listingRepo.findOneBy({ id });
+    if (!listing) throw new NotFoundException('Listing not found');
+    const isAdmin = user.role === UserRole.ADMIN;
+    if (!isAdmin && listing.company_id !== user.company_id) throw new ForbiddenException();
+
+    listing.status = ListingStatus.ACTIVE;
+    const expires_at = new Date();
+    expires_at.setDate(expires_at.getDate() + 30);
+    listing.expires_at = expires_at;
+    await this.listingRepo.save(listing);
+
+    return { message: 'Listing activated' };
+  }
+
   async deactivate(id: string, user: User): Promise<{ message: string }> {
     const listing = await this.listingRepo.findOneBy({ id });
     if (!listing) throw new NotFoundException('Listing not found');
@@ -272,7 +287,7 @@ export class ListingsService {
 
   async bulkAction(
     ids: string[],
-    action: 'delete' | 'deactivate',
+    action: 'delete' | 'deactivate' | 'activate',
     user: User,
   ): Promise<{ affected: number }> {
     if (!ids.length) return { affected: 0 };
@@ -286,6 +301,12 @@ export class ListingsService {
     for (const l of listings) {
       if (action === 'delete') {
         await this.listingRepo.remove(l);
+      } else if (action === 'activate') {
+        l.status = ListingStatus.ACTIVE;
+        const exp = new Date();
+        exp.setDate(exp.getDate() + 30);
+        l.expires_at = exp;
+        await this.listingRepo.save(l);
       } else {
         l.status = ListingStatus.INACTIVE;
         await this.listingRepo.save(l);
