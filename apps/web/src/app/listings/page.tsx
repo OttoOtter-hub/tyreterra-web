@@ -10,17 +10,17 @@ interface Listing {
 }
 
 export default function MyListingsPage() {
-  const [listings, setListings] = useState<{ data: Listing[] }>({ data: [] });
+  const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get<{ data: Listing[] }>('/listings?limit=100')
+    api.get<Listing[]>('/listings/mine')
       .then(setListings).catch(() => {}).finally(() => setLoading(false));
   }, []);
 
   const deactivate = async (id: string) => {
     await api.delete(`/listings/${id}`);
-    setListings(prev => ({ data: prev.data.filter(l => l.id !== id) }));
+    setListings(prev => prev.map(l => l.id === id ? { ...l, status: 'inactive' } : l));
   };
 
   return (
@@ -34,7 +34,7 @@ export default function MyListingsPage() {
 
         {loading && <div className="loading">Loading…</div>}
 
-        {!loading && listings.data.length === 0 && (
+        {!loading && listings.length === 0 && (
           <div className="empty">
             <h3>No active listings</h3>
             <p style={{ marginBottom: '1rem' }}>Create your first listing to start receiving requests.</p>
@@ -42,7 +42,7 @@ export default function MyListingsPage() {
           </div>
         )}
 
-        {!loading && listings.data.length > 0 && (
+        {!loading && listings.length > 0 && (
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             <table className="table">
               <thead>
@@ -52,7 +52,7 @@ export default function MyListingsPage() {
                 </tr>
               </thead>
               <tbody>
-                {listings.data.map(l => (
+                {listings.map(l => (
                   <tr key={l.id}>
                     <td><strong>{l.size_raw}</strong></td>
                     <td>{l.brand}</td>
@@ -62,9 +62,11 @@ export default function MyListingsPage() {
                     <td><span className={`badge badge-${l.status}`}>{l.status}</span></td>
                     <td style={{ fontSize: '.8rem', color: '#6b7280' }}>{new Date(l.expires_at).toLocaleDateString()}</td>
                     <td>
-                      <button className="btn btn-secondary btn-sm" onClick={() => deactivate(l.id)}>
-                        Deactivate
-                      </button>
+                      {l.status === 'active' && (
+                        <button className="btn btn-secondary btn-sm" onClick={() => deactivate(l.id)}>
+                          Deactivate
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}

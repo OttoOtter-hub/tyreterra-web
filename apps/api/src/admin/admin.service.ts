@@ -31,15 +31,16 @@ export class AdminService {
 
   // ── User approval queue (§10) ────────────────────────────────────────────
 
-  async getPendingUsers(): Promise<User[]> {
-    return this.userRepo.find({
+  async getPendingUsers(): Promise<Omit<User, 'password_hash'>[]> {
+    const users = await this.userRepo.find({
       where: { status: UserStatus.PENDING },
       relations: ['company'],
       order: { created_at: 'ASC' },
     });
+    return users.map(this.sanitiseUser);
   }
 
-  async approveOrReject(userId: string, dto: ApproveUserDto, admin: User): Promise<User> {
+  async approveOrReject(userId: string, dto: ApproveUserDto, admin: User): Promise<Omit<User, 'password_hash'>> {
     const user = await this.userRepo.findOne({ where: { id: userId }, relations: ['company'] });
     if (!user) throw new NotFoundException('User not found');
     if (user.status !== UserStatus.PENDING) {
@@ -64,36 +65,36 @@ export class AdminService {
     // Stub — replace with actual email when EmailService is wired to SendGrid
     this.email.sendOfferReceived(user.email, dto.action).catch(() => {});
 
-    return saved;
+    return this.sanitiseUser(saved);
   }
 
   // ── Block / unblock ──────────────────────────────────────────────────────
 
-  async blockUser(userId: string, admin: User): Promise<User> {
+  async blockUser(userId: string, admin: User): Promise<Omit<User, 'password_hash'>> {
     const user = await this.userRepo.findOneBy({ id: userId });
     if (!user) throw new NotFoundException('User not found');
     user.status = UserStatus.BLOCKED;
     const saved = await this.userRepo.save(user);
     await this.writeAudit('admin.user.blocked', admin.id, userId, {});
-    return saved;
+    return this.sanitiseUser(saved);
   }
 
-  async unblockUser(userId: string, admin: User): Promise<User> {
+  async unblockUser(userId: string, admin: User): Promise<Omit<User, 'password_hash'>> {
     const user = await this.userRepo.findOneBy({ id: userId });
     if (!user) throw new NotFoundException('User not found');
     user.status = UserStatus.ACTIVE;
     const saved = await this.userRepo.save(user);
     await this.writeAudit('admin.user.unblocked', admin.id, userId, {});
-    return saved;
+    return this.sanitiseUser(saved);
   }
 
-  async setRole(userId: string, role: UserRole, admin: User): Promise<User> {
+  async setRole(userId: string, role: UserRole, admin: User): Promise<Omit<User, 'password_hash'>> {
     const user = await this.userRepo.findOneBy({ id: userId });
     if (!user) throw new NotFoundException('User not found');
     user.role = role;
     const saved = await this.userRepo.save(user);
     await this.writeAudit('admin.user.role_changed', admin.id, userId, { role });
-    return saved;
+    return this.sanitiseUser(saved);
   }
 
   // ── Listing moderation ───────────────────────────────────────────────────
@@ -171,6 +172,11 @@ export class AdminService {
   async recalculateRating(companyId: string): Promise<{ message: string }> {
     await this.ratingsService.recalculateForCompany(companyId);
     return { message: `Rating recalculated for company ${companyId}` };
+  }
+
+  private sanitiseUser(user: User): Omit<User, 'password_hash'> {
+    const { password_hash, ...safe } = user;
+    return safe;
   }
 
   private async writeAudit(

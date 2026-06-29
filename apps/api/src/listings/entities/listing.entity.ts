@@ -76,6 +76,12 @@ export class Listing {
   @Column({ type: 'varchar', length: 100, nullable: true })
   pattern: string | null;
 
+  @Column({ type: 'varchar', length: 30, nullable: true, name: 'load_index' })
+  load_index: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true, name: 'origin_country' })
+  origin_country: string | null;
+
   @Column({ type: 'integer' })
   qty: number;
 

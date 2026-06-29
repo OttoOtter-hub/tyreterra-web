@@ -25,8 +25,8 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(days / 30)} months ago`;
 }
 
-function Stars({ score }: { score: number | null }) {
-  if (score === null) return <span className="stars-muted">New member</span>;
+function Stars({ score }: { score: number | null | undefined }) {
+  if (score == null) return <span className="stars-muted">New member</span>;
   const full = Math.floor(score);
   const half = score % 1 >= 0.5;
   return (

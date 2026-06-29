@@ -104,6 +104,14 @@ export class ListingsService {
     return this.sanitise(listing);
   }
 
+  async findMine(user: User): Promise<Listing[]> {
+    if (!user.company_id) return [];
+    return this.listingRepo.find({
+      where: { company_id: user.company_id },
+      order: { created_at: 'DESC' },
+    });
+  }
+
   async search(dto: SearchListingDto, viewer: User): Promise<{ data: CatalogueItem[]; total: number }> {
     const page = dto.page ?? 1;
     const limit = Math.min(dto.limit ?? 20, 100);

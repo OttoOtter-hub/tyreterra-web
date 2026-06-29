@@ -34,14 +34,26 @@ export class CreateListingDto {
   @MaxLength(100)
   pattern?: string;
 
+  // e.g. "12PR", "173D", "173D/178A8"
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  load_index?: string;
+
+  // Country of manufacture, e.g. "India", "Serbia", "Japan"
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  origin_country?: string;
+
   @IsInt()
   @Min(1)
   qty: number;
 
-  // WWYY format e.g. "1423"
+  // Year of production, e.g. "2023"
   @IsOptional()
   @IsString()
-  @Matches(/^\d{4}$/, { message: 'dot_code must be 4 digits WWYY' })
+  @Matches(/^20[0-2]\d$/, { message: 'dot_code must be a year 200x–202x' })
   dot_code?: string;
 
   // ISO 3166-1 alpha-2

@@ -45,4 +45,18 @@ export const api = {
   patch: <T = unknown>(path: string, body: unknown) =>
     req<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: <T = unknown>(path: string) => req<T>(path, { method: 'DELETE' }),
+  upload: async <T = unknown>(path: string, formData: FormData): Promise<T> => {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    if (!res.ok) {
+      const b = await res.json().catch(() => ({}));
+      const msg = Array.isArray(b?.message) ? b.message.join(', ') : b?.message ?? `HTTP ${res.status}`;
+      throw new ApiError(res.status, msg);
+    }
+    return res.json() as Promise<T>;
+  },
 };

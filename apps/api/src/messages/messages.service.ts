@@ -23,7 +23,29 @@ export class MessagesService {
       this.messageRepo.create({
         deal_id: dealId,
         sender_company_id: sender.company_id!,
-        body: dto.body,
+        body: dto.body ?? null,
+      }),
+    );
+  }
+
+  async sendFile(
+    dealId: string,
+    file: Express.Multer.File,
+    body: string | undefined,
+    sender: User,
+  ): Promise<Message> {
+    const deal = await this.loadDeal(dealId);
+    this.assertParticipant(deal, sender);
+
+    const file_url = `/uploads/${file.filename}`;
+
+    return this.messageRepo.save(
+      this.messageRepo.create({
+        deal_id: dealId,
+        sender_company_id: sender.company_id!,
+        body: body || null,
+        file_url,
+        file_name: file.originalname,
       }),
     );
   }

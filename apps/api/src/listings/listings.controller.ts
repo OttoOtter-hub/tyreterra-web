@@ -28,6 +28,11 @@ export class ListingsController {
     return this.listingsService.create(dto, req.user);
   }
 
+  @Get('mine')
+  findMine(@Request() req: { user: User }) {
+    return this.listingsService.findMine(req.user);
+  }
+
   @Get()
   search(@Query() dto: SearchListingDto, @Request() req: { user: User }) {
     return this.listingsService.search(dto, req.user);

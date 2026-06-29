@@ -28,8 +28,14 @@ export class Message {
   @JoinColumn({ name: 'sender_company_id' })
   sender_company: Company;
 
-  @Column({ type: 'text' })
-  body: string;
+  @Column({ type: 'text', nullable: true })
+  body: string | null;
+
+  @Column({ type: 'varchar', length: 500, nullable: true, name: 'file_url' })
+  file_url: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, name: 'file_name' })
+  file_name: string | null;
 
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   created_at: Date;

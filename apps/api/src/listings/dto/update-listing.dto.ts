@@ -32,13 +32,23 @@ export class UpdateListingDto {
   pattern?: string;
 
   @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  load_index?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  origin_country?: string;
+
+  @IsOptional()
   @IsInt()
   @Min(1)
   qty?: number;
 
   @IsOptional()
   @IsString()
-  @Matches(/^\d{4}$/, { message: 'dot_code must be 4 digits WWYY' })
+  @Matches(/^20[0-2]\d$/, { message: 'dot_code must be a year 200x–202x' })
   dot_code?: string;
 
   @IsOptional()
