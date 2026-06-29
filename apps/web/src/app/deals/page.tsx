@@ -11,6 +11,8 @@ interface Company { id: string; name: string; country: string; }
 interface Deal {
   id: string;
   accepted_at: string;
+  status: 'pending_pickup' | 'completed';
+  completed_at?: string | null;
   offer?: {
     price?: number;
     currency?: string;
@@ -84,12 +86,16 @@ export default function DealsPage() {
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
-                    gap: '.5rem', flexShrink: 0, minWidth: 130 }}>
+                    gap: '.5rem', flexShrink: 0, minWidth: 140 }}>
                     {d.offer?.price != null && (
                       <span style={{ fontWeight: 600, color: '#059669', fontSize: '.9rem' }}>
                         {d.offer.price.toLocaleString()} {d.offer.currency ?? 'EUR'}
                       </span>
                     )}
+                    {/* Status badge */}
+                    {d.status === 'completed'
+                      ? <span className="badge badge-new">✓ Received</span>
+                      : <span className="badge badge-pending">Awaiting pickup</span>}
                     <span style={{ fontSize: '.78rem', color: '#9ca3af' }}>
                       {new Date(d.accepted_at).toLocaleDateString()}
                     </span>

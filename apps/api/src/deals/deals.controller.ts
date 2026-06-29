@@ -47,6 +47,11 @@ export class DealsController {
     return this.dealsService.findOne(id, req.user);
   }
 
+  @Post(':id/confirm-receipt')
+  confirmReceipt(@Param('id', ParseUUIDPipe) id: string, @Request() req: { user: User }) {
+    return this.dealsService.confirmReceipt(id, req.user);
+  }
+
   // ── In-deal chat (§7.3) ──────────────────────────────────────────────────
 
   @Get(':id/messages')

@@ -21,6 +21,8 @@ interface Company { id: string; name: string; country: string; }
 
 interface Deal {
   id: string;
+  status: 'pending_pickup' | 'completed';
+  completed_at?: string | null;
   offer?: {
     price?: number;
     currency?: string;
@@ -59,9 +61,11 @@ export default function DealChatPage() {
   const { user } = useAuth();
   const [deal, setDeal] = useState<Deal | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
+
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState('');
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -127,9 +131,12 @@ export default function DealChatPage() {
             display: 'flex', flexDirection: 'column', gap: '.6rem' }}>
             <TireInfo listing={listing} qty={request?.qty_requested} />
 
-            {/* Price + participants */}
+            {/* Status + participants */}
             <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', fontSize: '.82rem',
               paddingTop: '.5rem', borderTop: '1px solid #f3f4f6', alignItems: 'center' }}>
+              {deal?.status === 'completed'
+                ? <span className="badge badge-new">✓ Goods received</span>
+                : <span className="badge badge-pending">Awaiting pickup by buyer</span>}
               {deal?.offer?.price != null && (
                 <span style={{ fontWeight: 600, color: '#059669' }}>
                   {deal.offer.price.toLocaleString()} {deal.offer.currency ?? 'EUR'}
@@ -156,6 +163,50 @@ export default function DealChatPage() {
         )}
 
         {error && <div className="alert alert-error" style={{ marginBottom: '.75rem' }}>{error}</div>}
+
+        {/* Buyer: confirm receipt button */}
+        {deal && deal.status === 'pending_pickup' &&
+         myCompanyId === request?.buyer_company_id && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '.75rem 1rem',
+            background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 8, marginBottom: '1rem' }}>
+            <span style={{ fontSize: '.9rem', color: '#92400e' }}>
+              ⏳ Waiting for you to confirm receipt of goods
+            </span>
+            <button
+              className="btn btn-primary btn-sm"
+              disabled={confirming}
+              style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}
+              onClick={async () => {
+                if (!confirm('Confirm that you have received the goods?')) return;
+                setConfirming(true);
+                try {
+                  const updated = await api.post<Deal>(`/deals/${id}/confirm-receipt`, {});
+                  setDeal(updated);
+                } catch (e) { setError((e as Error).message); }
+                finally { setConfirming(false); }
+              }}>
+              {confirming ? 'Confirming…' : '✓ I received the goods'}
+            </button>
+          </div>
+        )}
+
+        {/* Seller: waiting message */}
+        {deal && deal.status === 'pending_pickup' &&
+         myCompanyId !== request?.buyer_company_id && (
+          <div style={{ padding: '.6rem 1rem', background: '#f9fafb',
+            border: '1px solid #e5e7eb', borderRadius: 8, marginBottom: '1rem',
+            fontSize: '.85rem', color: '#6b7280' }}>
+            ⏳ Waiting for buyer to confirm receipt
+          </div>
+        )}
+
+        {deal?.status === 'completed' && deal.completed_at && (
+          <div style={{ padding: '.6rem 1rem', background: '#f0fdf4',
+            border: '1px solid #86efac', borderRadius: 8, marginBottom: '1rem',
+            fontSize: '.85rem', color: '#166534' }}>
+            ✓ Buyer confirmed receipt on {new Date(deal.completed_at).toLocaleDateString()}
+          </div>
+        )}
 
         <div className="chat-wrap">
           <div className="chat-messages">

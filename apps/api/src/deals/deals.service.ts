@@ -1,7 +1,7 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Deal } from './entities/deal.entity';
+import { Deal, DealStatus } from './entities/deal.entity';
 import { User } from '../auth/entities/user.entity';
 
 @Injectable()
@@ -42,6 +42,26 @@ export class DealsService {
     if (!deal) throw new NotFoundException('Deal not found');
     this.assertParticipant(deal, viewer);
     return deal;
+  }
+
+  async confirmReceipt(id: string, user: User): Promise<Deal> {
+    const deal = await this.dealRepo.findOne({
+      where: { id },
+      relations: ['offer', 'offer.request'],
+    });
+    if (!deal) throw new NotFoundException('Deal not found');
+
+    const buyerCompanyId = deal.offer?.request?.buyer_company_id;
+    if (user.company_id !== buyerCompanyId) {
+      throw new ForbiddenException('Only the buyer can confirm receipt');
+    }
+    if (deal.status === DealStatus.COMPLETED) {
+      throw new BadRequestException('Deal already completed');
+    }
+
+    deal.status = DealStatus.COMPLETED;
+    deal.completed_at = new Date();
+    return this.dealRepo.save(deal);
   }
 
   private assertParticipant(deal: Deal, user: User): void {
