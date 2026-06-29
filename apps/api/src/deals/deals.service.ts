@@ -24,6 +24,8 @@ export class DealsService {
       .leftJoinAndSelect('d.offer', 'offer')
       .leftJoinAndSelect('offer.request', 'request')
       .leftJoinAndSelect('request.listing', 'listing')
+      .leftJoinAndSelect('listing.company', 'seller_company')
+      .leftJoinAndSelect('request.buyer_company', 'buyer_company')
       .orderBy('d.accepted_at', 'DESC')
       .getMany();
   }
@@ -31,7 +33,11 @@ export class DealsService {
   async findOne(id: string, viewer: User): Promise<Deal> {
     const deal = await this.dealRepo.findOne({
       where: { id },
-      relations: ['offer', 'offer.request', 'offer.request.listing', 'messages'],
+      relations: [
+        'offer', 'offer.request', 'offer.request.listing',
+        'offer.request.listing.company', 'offer.request.buyer_company',
+        'messages',
+      ],
     });
     if (!deal) throw new NotFoundException('Deal not found');
     this.assertParticipant(deal, viewer);

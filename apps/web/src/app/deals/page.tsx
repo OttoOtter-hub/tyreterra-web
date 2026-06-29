@@ -3,7 +3,10 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import Navbar from '../../components/Navbar';
 import TireInfo, { TireListing } from '../../components/TireInfo';
+import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../lib/api';
+
+interface Company { id: string; name: string; country: string; }
 
 interface Deal {
   id: string;
@@ -13,12 +16,15 @@ interface Deal {
     currency?: string;
     request?: {
       qty_requested?: number;
-      listing?: TireListing;
+      buyer_company_id?: string;
+      buyer_company?: Company;
+      listing?: TireListing & { company_id?: string; company?: Company };
     };
   };
 }
 
 export default function DealsPage() {
+  const { user } = useAuth();
   const [deals, setDeals] = useState<Deal[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -41,14 +47,40 @@ export default function DealsPage() {
         {!loading && deals.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '.75rem' }}>
             {deals.map(d => {
-              const listing = d.offer?.request?.listing;
-              const qty = d.offer?.request?.qty_requested;
+              const request = d.offer?.request;
+              const listing = request?.listing;
+              const qty = request?.qty_requested;
+              const sellerCompany = listing?.company;
+              const buyerCompany = request?.buyer_company;
+              const isSeller = user?.company_id === listing?.company_id;
+
               return (
                 <div key={d.id} className="card" style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
-                  <div style={{ flex: 1 }}>
+                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '.6rem' }}>
                     {listing
                       ? <TireInfo listing={listing} qty={qty} />
                       : <span style={{ color: '#6b7280' }}>—</span>}
+
+                    {/* Participants */}
+                    {(sellerCompany || buyerCompany) && (
+                      <div style={{ display: 'flex', gap: '1.5rem', fontSize: '.8rem', flexWrap: 'wrap',
+                        paddingTop: '.5rem', borderTop: '1px solid #f3f4f6' }}>
+                        {sellerCompany && (
+                          <div>
+                            <span style={{ color: '#9ca3af', marginRight: '.3rem' }}>Seller:</span>
+                            <strong>{sellerCompany.name}</strong>
+                            {isSeller && <span style={{ marginLeft: '.3rem', color: '#1a56db', fontSize: '.75rem' }}>(you)</span>}
+                          </div>
+                        )}
+                        {buyerCompany && (
+                          <div>
+                            <span style={{ color: '#9ca3af', marginRight: '.3rem' }}>Buyer:</span>
+                            <strong>{buyerCompany.name}</strong>
+                            {!isSeller && <span style={{ marginLeft: '.3rem', color: '#1a56db', fontSize: '.75rem' }}>(you)</span>}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end',

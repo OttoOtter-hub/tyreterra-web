@@ -17,13 +17,18 @@ interface Msg {
   created_at: string;
 }
 
+interface Company { id: string; name: string; country: string; }
+
 interface Deal {
   id: string;
   offer?: {
+    price?: number;
+    currency?: string;
     request?: {
       buyer_company_id: string;
       qty_requested?: number;
-      listing?: TireListing & { company_id: string };
+      buyer_company?: Company;
+      listing?: TireListing & { company_id: string; company?: Company };
     };
   };
 }
@@ -116,10 +121,37 @@ export default function DealChatPage() {
           <span style={{ fontSize: '.85rem', color: '#6b7280' }}>In-deal chat</span>
         </div>
 
-        {/* Tire summary card */}
+        {/* Tire + participants card */}
         {listing && (
-          <div className="card" style={{ marginBottom: '1rem', padding: '.75rem 1rem' }}>
+          <div className="card" style={{ marginBottom: '1rem', padding: '.75rem 1rem',
+            display: 'flex', flexDirection: 'column', gap: '.6rem' }}>
             <TireInfo listing={listing} qty={request?.qty_requested} />
+
+            {/* Price + participants */}
+            <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap', fontSize: '.82rem',
+              paddingTop: '.5rem', borderTop: '1px solid #f3f4f6', alignItems: 'center' }}>
+              {deal?.offer?.price != null && (
+                <span style={{ fontWeight: 600, color: '#059669' }}>
+                  {deal.offer.price.toLocaleString()} {deal.offer.currency ?? 'EUR'}
+                </span>
+              )}
+              {request?.listing?.company && (
+                <span>
+                  <span style={{ color: '#9ca3af' }}>Seller: </span>
+                  <strong>{request.listing.company.name}</strong>
+                  {myCompanyId === listing.company_id &&
+                    <span style={{ color: '#1a56db', marginLeft: '.25rem', fontSize: '.75rem' }}>(you)</span>}
+                </span>
+              )}
+              {request?.buyer_company && (
+                <span>
+                  <span style={{ color: '#9ca3af' }}>Buyer: </span>
+                  <strong>{request.buyer_company.name}</strong>
+                  {myCompanyId === request.buyer_company_id &&
+                    <span style={{ color: '#1a56db', marginLeft: '.25rem', fontSize: '.75rem' }}>(you)</span>}
+                </span>
+              )}
+            </div>
           </div>
         )}
 
