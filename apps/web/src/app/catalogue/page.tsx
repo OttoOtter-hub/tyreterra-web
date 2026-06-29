@@ -4,8 +4,27 @@ import Navbar from '../../components/Navbar';
 import ListingCard from '../../components/ListingCard';
 import { api } from '../../lib/api';
 
-const SEGMENTS = ['', 'TBR', 'OTR', 'AGRI'];
+const SEGMENTS = ['', 'TBR', 'PCR', 'OTR', 'AGRI', 'MH'];
 const CONDITIONS = ['', 'new', 'used', 'retreaded'];
+
+const TIRE_TYPES: Record<string, { label: string; value: string }[]> = {
+  TBR: [
+    { label: 'Steer', value: 'steer' },
+    { label: 'Drive', value: 'drive' },
+    { label: 'Trailer', value: 'trailer' },
+    { label: 'All Position', value: 'all_position' },
+  ],
+  PCR: [
+    { label: 'Summer', value: 'summer' },
+    { label: 'Winter Friction', value: 'winter_friction' },
+    { label: 'Winter Stud', value: 'winter_stud' },
+    { label: 'All Season', value: 'all_season' },
+  ],
+  MH: [
+    { label: 'Pneumatic', value: 'pneumatic' },
+    { label: 'Solid', value: 'solid' },
+  ],
+};
 
 interface SearchResult {
   data: Parameters<typeof ListingCard>[0]['listing'][];
@@ -17,7 +36,7 @@ export default function CataloguePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [filters, setFilters] = useState({
-    segment: '', brand: '', size_raw: '', location_country: '',
+    segment: '', tire_type: '', brand: '', size_raw: '', location_country: '',
     condition: '', qty_min: '', page: 1,
   });
 
@@ -37,8 +56,16 @@ export default function CataloguePage() {
 
   useEffect(() => { search(); }, [search]);
 
-  const setF = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setFilters(f => ({ ...f, [field]: e.target.value, page: 1 }));
+  const setF = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const value = e.target.value;
+    setFilters(f => {
+      const next = { ...f, [field]: value, page: 1 };
+      if (field === 'segment') next.tire_type = '';
+      return next;
+    });
+  };
+
+  const tireTypeOptions = TIRE_TYPES[filters.segment] ?? [];
 
   return (
     <>
@@ -56,6 +83,19 @@ export default function CataloguePage() {
               {SEGMENTS.map(s => <option key={s} value={s}>{s || 'All'}</option>)}
             </select>
           </div>
+
+          {tireTypeOptions.length > 0 && (
+            <div className="form-group">
+              <label>Type</label>
+              <select className="form-control" value={filters.tire_type} onChange={setF('tire_type')}>
+                <option value="">All</option>
+                {tireTypeOptions.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           <div className="form-group">
             <label>Brand</label>
             <input className="form-control" value={filters.brand} onChange={setF('brand')} placeholder="Any brand" />

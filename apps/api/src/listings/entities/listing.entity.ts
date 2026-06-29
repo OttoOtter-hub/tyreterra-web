@@ -13,8 +13,10 @@ import { Request } from '../../requests/entities/request.entity';
 
 export enum TireSegment {
   TBR = 'TBR',
+  PCR = 'PCR',
   OTR = 'OTR',
   AGRI = 'AGRI',
+  MH = 'MH',
 }
 
 export enum TireCondition {
@@ -72,6 +74,10 @@ export class Listing {
   @Column({ type: 'varchar', length: 30, name: 'size_raw' })
   size_raw: string;
   // ─────────────────────────────────────────────────────────────────────────
+
+  // Subtype per segment: TBR→steer/drive/trailer/all_position, PCR→summer/winter_friction/winter_stud/all_season, MH→pneumatic/solid
+  @Column({ type: 'varchar', length: 30, nullable: true, name: 'tire_type' })
+  tire_type: string | null;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   pattern: string | null;

@@ -34,6 +34,11 @@ export class UpdateListingDto {
   @IsOptional()
   @IsString()
   @MaxLength(30)
+  tire_type?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
   load_index?: string;
 
   @IsOptional()

@@ -77,6 +77,7 @@ export class ListingsService {
         size_construction: parsed.size_construction,
         size_rim: parsed.size_rim,
         size_raw: parsed.size_raw,
+        tire_type: dto.tire_type ?? null,
         pattern: dto.pattern ?? null,
         qty: dto.qty,
         dot_code: dto.dot_code ?? null,
@@ -133,6 +134,7 @@ export class ListingsService {
     }
 
     if (dto.segment) qb.andWhere('l.segment = :segment', { segment: dto.segment });
+    if (dto.tire_type) qb.andWhere('l.tire_type = :tire_type', { tire_type: dto.tire_type });
     if (dto.brand) qb.andWhere('LOWER(l.brand) = LOWER(:brand)', { brand: dto.brand });
     if (dto.condition) qb.andWhere('l.condition = :condition', { condition: dto.condition });
     if (dto.location_country) {

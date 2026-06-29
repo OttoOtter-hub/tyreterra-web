@@ -5,13 +5,32 @@ import Navbar from '../../../components/Navbar';
 import TireSizeInput from '../../../components/TireSizeInput';
 import { api } from '../../../lib/api';
 
-const SEGMENTS = ['TBR', 'OTR', 'AGRI'];
+const SEGMENTS = ['TBR', 'PCR', 'OTR', 'AGRI', 'MH'];
 const CONDITIONS = ['new', 'used', 'retreaded'];
+
+const TIRE_TYPES: Record<string, { label: string; value: string }[]> = {
+  TBR: [
+    { label: 'Steer', value: 'steer' },
+    { label: 'Drive', value: 'drive' },
+    { label: 'Trailer', value: 'trailer' },
+    { label: 'All Position', value: 'all_position' },
+  ],
+  PCR: [
+    { label: 'Summer', value: 'summer' },
+    { label: 'Winter Friction', value: 'winter_friction' },
+    { label: 'Winter Stud', value: 'winter_stud' },
+    { label: 'All Season', value: 'all_season' },
+  ],
+  MH: [
+    { label: 'Pneumatic', value: 'pneumatic' },
+    { label: 'Solid', value: 'solid' },
+  ],
+};
 
 export default function NewListingPage() {
   const router = useRouter();
   const [form, setForm] = useState({
-    segment: 'TBR', brand: '', size: '', pattern: '',
+    segment: 'TBR', tire_type: '', brand: '', size: '', pattern: '',
     qty: '', production_year: '', load_index: '', origin_country: '',
     location_country: '', location_region: '',
     condition: 'new', exclude_own_region: false,
@@ -19,8 +38,15 @@ export default function NewListingPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-    setForm(f => ({ ...f, [field]: e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value }));
+  const set = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const value = e.target.type === 'checkbox' ? (e.target as HTMLInputElement).checked : e.target.value;
+    setForm(f => {
+      const next = { ...f, [field]: value };
+      // reset tire_type when segment changes
+      if (field === 'segment') next.tire_type = '';
+      return next;
+    });
+  };
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -35,6 +61,7 @@ export default function NewListingPage() {
         qty: parseInt(form.qty, 10),
         condition: form.condition,
         location_country: form.location_country.toUpperCase(),
+        tire_type: form.tire_type || undefined,
         pattern: form.pattern || undefined,
         load_index: form.load_index || undefined,
         origin_country: form.origin_country || undefined,
@@ -50,6 +77,8 @@ export default function NewListingPage() {
     }
   }
 
+  const tireTypeOptions = TIRE_TYPES[form.segment] ?? [];
+
   return (
     <>
       <Navbar />
@@ -63,11 +92,25 @@ export default function NewListingPage() {
             {error && <div className="alert alert-error">{error}</div>}
 
             <form onSubmit={handleSubmit}>
-              <div className="form-group">
-                <label>Segment *</label>
-                <select className="form-control" value={form.segment} onChange={set('segment')}>
-                  {SEGMENTS.map(s => <option key={s}>{s}</option>)}
-                </select>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label>Segment *</label>
+                  <select className="form-control" value={form.segment} onChange={set('segment')}>
+                    {SEGMENTS.map(s => <option key={s}>{s}</option>)}
+                  </select>
+                </div>
+
+                {tireTypeOptions.length > 0 && (
+                  <div className="form-group">
+                    <label>Type *</label>
+                    <select className="form-control" value={form.tire_type} onChange={set('tire_type')} required>
+                      <option value="">— select —</option>
+                      {tireTypeOptions.map(o => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
 
               <div className="form-group">
@@ -86,7 +129,7 @@ export default function NewListingPage() {
 
               <div className="form-group">
                 <label>Pattern</label>
-                <input className="form-control" value={form.pattern} onChange={set('pattern')} placeholder="Необязательно" />
+                <input className="form-control" value={form.pattern} onChange={set('pattern')} placeholder="Optional" />
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -115,13 +158,12 @@ export default function NewListingPage() {
                   <input className="form-control" type="number" min={1} value={form.qty}
                     onChange={set('qty')} required />
                 </div>
-              </div>
-
-              <div className="form-group">
-                <label>Condition *</label>
-                <select className="form-control" value={form.condition} onChange={set('condition')}>
-                  {CONDITIONS.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
-                </select>
+                <div className="form-group">
+                  <label>Condition *</label>
+                  <select className="form-control" value={form.condition} onChange={set('condition')}>
+                    {CONDITIONS.map(c => <option key={c} value={c}>{c.charAt(0).toUpperCase() + c.slice(1)}</option>)}
+                  </select>
+                </div>
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>

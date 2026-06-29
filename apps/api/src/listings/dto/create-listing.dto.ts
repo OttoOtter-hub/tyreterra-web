@@ -34,6 +34,12 @@ export class CreateListingDto {
   @MaxLength(100)
   pattern?: string;
 
+  // TBR: steer|drive|trailer|all_position  PCR: summer|winter_friction|winter_stud|all_season  MH: pneumatic|solid
+  @IsOptional()
+  @IsString()
+  @MaxLength(30)
+  tire_type?: string;
+
   // e.g. "12PR", "173D", "173D/178A8"
   @IsOptional()
   @IsString()

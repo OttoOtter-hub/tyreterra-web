@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 interface Listing {
   id: string;
   segment: string;
+  tire_type: string | null;
   size_raw: string;
   brand: string;
   pattern: string | null;
@@ -57,8 +58,13 @@ export default function ListingCard({ listing }: { listing: Listing }) {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center' }}>
+      <div style={{ display: 'flex', gap: '.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
         <span className={`badge badge-${listing.condition}`}>{listing.condition}</span>
+        {listing.tire_type && (
+          <span className="badge" style={{ background: '#e0f2fe', color: '#0369a1', textTransform: 'capitalize' }}>
+            {listing.tire_type.replace(/_/g, ' ')}
+          </span>
+        )}
         <span style={{ color: '#6b7280', fontSize: '.8rem' }}>
           {listing.seller_country ?? listing.location_country}
         </span>

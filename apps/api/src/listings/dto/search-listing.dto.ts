@@ -43,6 +43,10 @@ export class SearchListingDto {
   qty_min?: number;
 
   @IsOptional()
+  @IsString()
+  tire_type?: string;
+
+  @IsOptional()
   @IsEnum(TireCondition)
   condition?: TireCondition;
 
