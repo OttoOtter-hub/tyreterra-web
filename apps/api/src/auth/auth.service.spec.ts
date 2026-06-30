@@ -5,8 +5,10 @@ import { ConflictException, ForbiddenException, UnauthorizedException } from '@n
 import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { User, UserRole, UserStatus } from './entities/user.entity';
+import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { Company } from '../companies/entities/company.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
+import { EmailService } from '../common/email.service';
 
 const mockRepo = () => ({
   findOneBy: jest.fn(),
@@ -16,6 +18,7 @@ const mockRepo = () => ({
 });
 
 const mockJwt = () => ({ sign: jest.fn(() => 'signed-token') });
+const mockEmail = () => ({ sendPasswordReset: jest.fn() });
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -30,7 +33,9 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(User), useFactory: mockRepo },
         { provide: getRepositoryToken(Company), useFactory: mockRepo },
         { provide: getRepositoryToken(AuditLog), useFactory: mockRepo },
+        { provide: getRepositoryToken(PasswordResetToken), useFactory: mockRepo },
         { provide: JwtService, useFactory: mockJwt },
+        { provide: EmailService, useFactory: mockEmail },
       ],
     }).compile();
 
