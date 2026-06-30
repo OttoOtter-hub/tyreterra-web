@@ -27,6 +27,11 @@ async function req<T = unknown>(
   });
 
   if (!res.ok) {
+    if (res.status === 429) {
+      const retryAfter = res.headers.get('Retry-After');
+      const wait = retryAfter ? ` Try again in ${formatWait(retryAfter)}.` : ' Please try again shortly.';
+      throw new ApiError(429, `Too many attempts.${wait}`);
+    }
     const body = await res.json().catch(() => ({}));
     const msg = Array.isArray(body?.message)
       ? body.message.join(', ')
@@ -36,6 +41,14 @@ async function req<T = unknown>(
 
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+function formatWait(retryAfterSeconds: string): string {
+  const seconds = parseInt(retryAfterSeconds, 10);
+  if (isNaN(seconds)) return 'a moment';
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.ceil(seconds / 60);
+  return minutes === 1 ? '1 minute' : `${minutes} minutes`;
 }
 
 export const api = {
