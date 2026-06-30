@@ -131,6 +131,9 @@ export class Listing {
   @OneToMany(() => Request, (request) => request.listing)
   requests: Request[];
 
+  @Column({ type: 'timestamptz', nullable: true, name: 'deleted_at' })
+  deleted_at: Date | null;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   created_at: Date;
 

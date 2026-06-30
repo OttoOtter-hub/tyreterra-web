@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, IsNull } from 'typeorm';
 import { Listing, ListingStatus, AllowedRoles } from './entities/listing.entity';
 import { User, UserRole } from '../auth/entities/user.entity';
 import { parseTireSize, TireSizeParseError } from '../common/tire-size.parser';
@@ -123,7 +123,7 @@ export class ListingsService {
   async findMine(user: User): Promise<(Listing & { price?: number | null })[]> {
     if (!user.company_id) return [];
     const listings = await this.listingRepo.find({
-      where: { company_id: user.company_id },
+      where: { company_id: user.company_id, deleted_at: IsNull() },
       order: { created_at: 'DESC' },
     });
     return listings.map(l => this.withDecryptedPrice(l));
@@ -140,6 +140,7 @@ export class ListingsService {
       // §6.1: include seller country and rating; §6.2: never expose company name
       .addSelect(['c.country', 'r.score', 'r.interaction_count'])
       .where('l.status = :status', { status: ListingStatus.ACTIVE })
+      .andWhere('l.deleted_at IS NULL')
       .andWhere('l.expires_at > NOW()');
 
     if (dto.segment) qb.andWhere('l.segment = :segment', { segment: dto.segment });
@@ -186,7 +187,7 @@ export class ListingsService {
       where: { id },
       relations: ['company'],
     });
-    if (!listing || listing.status === ListingStatus.EXPIRED) {
+    if (!listing || listing.status === ListingStatus.EXPIRED || listing.deleted_at) {
       throw new NotFoundException('Listing not found');
     }
     this.assertVisible(listing, viewer);
@@ -199,7 +200,7 @@ export class ListingsService {
   }
 
   async update(id: string, dto: UpdateListingDto, user: User): Promise<Listing> {
-    const listing = await this.listingRepo.findOneBy({ id });
+    const listing = await this.listingRepo.findOneBy({ id, deleted_at: IsNull() });
     if (!listing) throw new NotFoundException('Listing not found');
 
     const isAdmin = user.role === UserRole.ADMIN;
@@ -247,7 +248,7 @@ export class ListingsService {
   }
 
   async activate(id: string, user: User): Promise<{ message: string }> {
-    const listing = await this.listingRepo.findOneBy({ id });
+    const listing = await this.listingRepo.findOneBy({ id, deleted_at: IsNull() });
     if (!listing) throw new NotFoundException('Listing not found');
     const isAdmin = user.role === UserRole.ADMIN;
     if (!isAdmin && listing.company_id !== user.company_id) throw new ForbiddenException();
@@ -262,7 +263,7 @@ export class ListingsService {
   }
 
   async deactivate(id: string, user: User): Promise<{ message: string }> {
-    const listing = await this.listingRepo.findOneBy({ id });
+    const listing = await this.listingRepo.findOneBy({ id, deleted_at: IsNull() });
     if (!listing) throw new NotFoundException('Listing not found');
     const isAdmin = user.role === UserRole.ADMIN;
     if (!isAdmin && listing.company_id !== user.company_id) throw new ForbiddenException();
@@ -283,13 +284,17 @@ export class ListingsService {
     return { message: 'Listing deactivated' };
   }
 
+  // Soft delete — preserves audit trail and dispute history. Sets deleted_at
+  // and status=inactive instead of removing the row.
   async hardDelete(id: string, user: User): Promise<{ message: string }> {
-    const listing = await this.listingRepo.findOneBy({ id });
+    const listing = await this.listingRepo.findOneBy({ id, deleted_at: IsNull() });
     if (!listing) throw new NotFoundException('Listing not found');
     const isAdmin = user.role === UserRole.ADMIN;
     if (!isAdmin && listing.company_id !== user.company_id) throw new ForbiddenException();
 
-    await this.listingRepo.remove(listing);
+    listing.deleted_at = new Date();
+    listing.status = ListingStatus.INACTIVE;
+    await this.listingRepo.save(listing);
 
     await this.auditRepo.save(
       this.auditRepo.create({
@@ -313,13 +318,19 @@ export class ListingsService {
     const isAdmin = user.role === UserRole.ADMIN;
 
     const listings = await this.listingRepo.findBy(
-      ids.map(id => ({ id, ...(!isAdmin ? { company_id: user.company_id! } : {}) })),
+      ids.map(id => ({
+        id,
+        deleted_at: IsNull(),
+        ...(!isAdmin ? { company_id: user.company_id! } : {}),
+      })),
     );
 
     let affected = 0;
     for (const l of listings) {
       if (action === 'delete') {
-        await this.listingRepo.remove(l);
+        l.deleted_at = new Date();
+        l.status = ListingStatus.INACTIVE;
+        await this.listingRepo.save(l);
       } else if (action === 'activate') {
         l.status = ListingStatus.ACTIVE;
         const exp = new Date();
@@ -337,7 +348,7 @@ export class ListingsService {
   }
 
   async renew(id: string, user: User): Promise<Listing> {
-    const listing = await this.listingRepo.findOneBy({ id });
+    const listing = await this.listingRepo.findOneBy({ id, deleted_at: IsNull() });
     if (!listing) throw new NotFoundException('Listing not found');
     if (listing.company_id !== user.company_id) throw new ForbiddenException();
 

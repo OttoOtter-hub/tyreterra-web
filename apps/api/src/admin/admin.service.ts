@@ -103,6 +103,7 @@ export class AdminService {
     const listing = await this.listingRepo.findOneBy({ id: listingId });
     if (!listing) throw new NotFoundException('Listing not found');
     listing.status = ListingStatus.INACTIVE;
+    listing.deleted_at = new Date();
     await this.listingRepo.save(listing);
     await this.writeAudit('admin.listing.removed', admin.id, listingId, {});
     return { message: 'Listing removed by admin' };
