@@ -1,4 +1,9 @@
-import 'dotenv/config';
+import * as dotenv from 'dotenv';
+
+// APP_ENV=staging → loads .env.staging; default (unset) → loads .env (production stays default)
+const envFile = process.env.APP_ENV === 'staging' ? '.env.staging' : '.env';
+dotenv.config({ path: envFile });
+
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
@@ -19,7 +24,7 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 3001;
   await app.listen(port);
-  console.log(`API running on http://localhost:${port}/api`);
+  console.log(`API running on http://localhost:${port}/api [env: ${envFile}]`);
 }
 
 bootstrap();

@@ -3,6 +3,8 @@ dist/
 .next/
 .env
 .env.local
+.env.staging
+.env.*.local
 *.log
 coverage/
 .DS_Store

@@ -7,13 +7,16 @@
     "start": "node dist/main",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
+    "start:staging": "cross-env APP_ENV=staging nest start",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "typeorm": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js",
     "migration:run": "npm run typeorm -- migration:run -d src/config/data-source.ts",
     "migration:revert": "npm run typeorm -- migration:revert -d src/config/data-source.ts",
-    "migration:generate": "npm run typeorm -- migration:generate -d src/config/data-source.ts"
+    "migration:generate": "npm run typeorm -- migration:generate -d src/config/data-source.ts",
+    "migration:run:staging": "cross-env APP_ENV=staging npm run migration:run",
+    "migration:revert:staging": "cross-env APP_ENV=staging npm run migration:revert"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.0",

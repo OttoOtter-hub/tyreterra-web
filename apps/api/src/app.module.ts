@@ -14,7 +14,11 @@ import { databaseConfig } from './config/database.config';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ isGlobal: true, envFilePath: '.env' }),
+    // APP_ENV=staging → .env.staging; default → .env (production stays default behaviour)
+    ConfigModule.forRoot({
+      isGlobal: true,
+      envFilePath: process.env.APP_ENV === 'staging' ? '.env.staging' : '.env',
+    }),
     TypeOrmModule.forRootAsync({ useFactory: databaseConfig }),
     ScheduleModule.forRoot(),
     AuthModule,

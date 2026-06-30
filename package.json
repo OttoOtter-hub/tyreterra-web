@@ -16,5 +16,8 @@
   "dependencies": {
     "@nestjs/schedule": "^6.1.3",
     "cron": "^4.4.0"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0"
   }
 }
