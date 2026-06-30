@@ -1,15 +1,12 @@
 'use client';
 import { useState, FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { useAuth } from '../../contexts/AuthContext';
+import { api } from '../../lib/api';
 
-export default function LoginPage() {
-  const { login } = useAuth();
-  const router = useRouter();
+export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
@@ -17,8 +14,8 @@ export default function LoginPage() {
     setError('');
     setLoading(true);
     try {
-      await login(email, password);
-      router.push('/catalogue');
+      await api.post('/auth/forgot-password', { email });
+      setSuccess(true);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -26,12 +23,29 @@ export default function LoginPage() {
     }
   }
 
+  if (success) {
+    return (
+      <div className="auth-wrap">
+        <div className="auth-box">
+          <div className="card">
+            <div className="alert alert-success" style={{ marginBottom: 0 }}>
+              If an account exists for that email, a password reset link has been sent.
+            </div>
+            <p style={{ marginTop: '1rem', textAlign: 'center' }}>
+              <Link href="/login">Back to login</Link>
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="auth-wrap">
       <div className="auth-box">
         <div className="card">
-          <h1 className="auth-title">Tyre Terra</h1>
-          <p className="auth-sub">Sign in to your B2B account</p>
+          <h1 className="auth-title">Reset your password</h1>
+          <p className="auth-sub">Enter your email and we&apos;ll send you a reset link</p>
 
           {error && <div className="alert alert-error">{error}</div>}
 
@@ -41,21 +55,13 @@ export default function LoginPage() {
               <input className="form-control" type="email" value={email}
                 onChange={e => setEmail(e.target.value)} required autoFocus />
             </div>
-            <div className="form-group">
-              <label>Password</label>
-              <input className="form-control" type="password" value={password}
-                onChange={e => setPassword(e.target.value)} required />
-              <p style={{ marginTop: '.4rem', fontSize: '.85rem', textAlign: 'right' }}>
-                <Link href="/forgot-password">Forgot password?</Link>
-              </p>
-            </div>
             <button className="btn btn-primary btn-full" type="submit" disabled={loading}>
-              {loading ? 'Signing in…' : 'Sign in'}
+              {loading ? 'Sending…' : 'Send reset link'}
             </button>
           </form>
 
           <p style={{ marginTop: '1rem', fontSize: '.9rem', textAlign: 'center', color: '#6b7280' }}>
-            No account? <Link href="/register">Register your company</Link>
+            <Link href="/login">Back to login</Link>
           </p>
         </div>
       </div>

@@ -1,5 +1,6 @@
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { User } from '../auth/entities/user.entity';
+import { PasswordResetToken } from '../auth/entities/password-reset-token.entity';
 import { Company } from '../companies/entities/company.entity';
 import { Listing } from '../listings/entities/listing.entity';
 import { Request } from '../requests/entities/request.entity';
@@ -10,7 +11,7 @@ import { Rating } from '../ratings/entities/rating.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 
 export const ALL_ENTITIES = [
-  User, Company, Listing, Request, Offer, Deal, Message, Rating, AuditLog,
+  User, Company, Listing, Request, Offer, Deal, Message, Rating, AuditLog, PasswordResetToken,
 ];
 
 // Prefer DATABASE_URL (used by .env.staging) when present; otherwise fall back

@@ -3,6 +3,8 @@ import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { User } from './entities/user.entity';
 
@@ -30,5 +32,18 @@ export class AuthController {
   @Get('me')
   getProfile(@Request() req: { user: User }) {
     return this.authService.getProfile(req.user.id);
+  }
+
+  // 3 requests per hour per IP — prevents email enumeration / spam
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 3, ttl: 60 * 60_000 } })
+  @Post('forgot-password')
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  @Post('reset-password')
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
   }
 }

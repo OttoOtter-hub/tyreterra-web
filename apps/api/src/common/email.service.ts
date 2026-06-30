@@ -16,4 +16,8 @@ export class EmailService {
   async sendDealAccepted(sellerEmail: string, buyerEmail: string, listingSize: string): Promise<void> {
     this.logger.log(`[EMAIL] Deal accepted for ${listingSize} → seller: ${sellerEmail}, buyer: ${buyerEmail}`);
   }
+
+  async sendPasswordReset(email: string, resetUrl: string): Promise<void> {
+    this.logger.log(`[EMAIL] Password reset → ${email} | link: ${resetUrl}`);
+  }
 }
