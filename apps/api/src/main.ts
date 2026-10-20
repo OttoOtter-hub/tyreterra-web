@@ -27,8 +27,10 @@ async function bootstrap() {
   app.enableCors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' });
 
   const port = process.env.PORT ?? 3001;
-  await app.listen(port);
-  console.log(`API running on http://localhost:${port}/api [env: ${envFile}]`);
+  // Loopback by default — only nginx should reach the API; set HOST=0.0.0.0 to expose it.
+  const host = process.env.HOST ?? '127.0.0.1';
+  await app.listen(port, host);
+  console.log(`API running on http://${host}:${port}/api [env: ${envFile}]`);
 }
 
 bootstrap();
