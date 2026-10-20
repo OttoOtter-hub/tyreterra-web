@@ -1,6 +1,6 @@
 /**
  * One-time script: creates an admin user in the DB.
- * Usage: npx ts-node -r tsconfig-paths/register src/seed-admin.ts
+ * Usage: SEED_ADMIN_PASSWORD=... npx ts-node -r tsconfig-paths/register src/seed-admin.ts
  */
 import 'dotenv/config';
 import { Client } from 'pg';
@@ -8,9 +8,14 @@ import * as bcrypt from 'bcryptjs';
 import { randomUUID } from 'crypto';
 
 const EMAIL = process.env.SEED_ADMIN_EMAIL ?? 'admin@tyreterra.com';
-const PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? 'Admin1234!';
+const PASSWORD = process.env.SEED_ADMIN_PASSWORD;
 
 async function main() {
+  if (!PASSWORD) {
+    console.error('SEED_ADMIN_PASSWORD is not set — refusing to create an admin with a default password');
+    process.exit(1);
+  }
+
   const client = new Client({
     host: process.env.DATABASE_HOST,
     port: Number(process.env.DATABASE_PORT ?? 5432),
@@ -49,7 +54,6 @@ async function main() {
 
   console.log(`Admin user created:`);
   console.log(`  Email:    ${EMAIL}`);
-  console.log(`  Password: ${PASSWORD}`);
   console.log(`  ID:       ${userId}`);
 
   await client.end();
