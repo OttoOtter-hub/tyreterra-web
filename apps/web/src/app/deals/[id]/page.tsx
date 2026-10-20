@@ -36,7 +36,8 @@ interface Deal {
 }
 
 function FileAttachment({ file_url, file_name }: { file_url: string; file_name: string }) {
-  const url = `http://84.247.189.142${file_url}`;
+  // file_url is "/uploads/<uuid>" — served by nginx on the same origin as the app
+  const url = file_url;
   const isImage = /\.(jpg|jpeg|png|webp|gif)$/i.test(file_name);
   if (isImage) {
     return (
