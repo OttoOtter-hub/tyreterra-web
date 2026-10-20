@@ -1,57 +1,181 @@
 # Deployment & Environments
 
-## Environments
+Manual deployment, no CI/CD and no Docker in production: the code is cloned and **built on the server**, and PM2 runs it under an unprivileged user. `docker-compose.yml` is only for a local Postgres (development and the e2e tests).
 
-| Env | Selector | DB | Used for |
-|---|---|---|---|
-| **Production** (default) | nothing set / `APP_ENV` unset | Neon `main` branch | Live site at `84.247.189.142` |
-| **Staging** | `APP_ENV=staging` | Neon `staging` branch (copy-on-write clone of `main`) | Safe iteration before merging risky changes (e.g. Distributor Orders module) |
+No real hosts, passwords, keys or connection strings belong in this repo. They exist only in the server's `.env` files (gitignored, mode 600).
 
-Production stays the default in every script — you must explicitly opt into staging.
+## Layout on the server
 
-## Config files (`apps/api/`)
+| What | Where |
+|---|---|
+| App user | `tyreterra` — no sudo, no password, owns the app files |
+| Code | `/opt/tyreterra` (git clone of `master`, mode 750) |
+| API config | `/opt/tyreterra/apps/api/.env` (mode 600, owner `tyreterra`) |
+| Web build config | `/opt/tyreterra/apps/web/.env.production` |
+| Uploads | `/var/www/uploads` (owner `tyreterra`, group `www-data`, mode 750) — the path is fixed in `deals.controller.ts` |
+| PM2 config | `/home/tyreterra/ecosystem.config.js` |
+| PM2 boot unit | `pm2-tyreterra` (systemd, runs as `tyreterra`) |
 
-- `.env` — production credentials (gitignored, already exists, **unchanged**)
-- `.env.staging` — staging credentials (gitignored, new). Uses a single `DATABASE_URL` instead of the discrete `DATABASE_HOST/PORT/USER/PASSWORD/NAME` vars — both forms are supported; `DATABASE_URL` takes priority when present.
+| Process | Listens on |
+|---|---|
+| `tyreterra-api` (NestJS) | `127.0.0.1:3101` |
+| `tyreterra-web` (Next.js) | `127.0.0.1:3100` |
 
-`.gitignore` covers `.env`, `.env.local`, `.env.staging`, and `.env.*.local` — none of these are ever committed.
+Both bind to localhost only; the firewall allows SSH only. Until a domain exists the app is used through an SSH tunnel:
 
-## Running against staging vs production
+```bash
+ssh -N -L 3100:127.0.0.1:3100 -L 3101:127.0.0.1:3101 root@<server>
+# then open http://localhost:3100
+```
+
+## Configuration
+
+### API — `apps/api/.env`
+
+| Variable | Required | Notes |
+|---|---|---|
+| `NODE_ENV` | yes | `production` on the server |
+| `PORT` | yes | `3101` |
+| `HOST` | no | bind address, default `127.0.0.1`; set `0.0.0.0` only if the API really must be exposed |
+| `DATABASE_URL` | yes* | Neon connection string; takes priority over the discrete `DATABASE_HOST/PORT/USER/PASSWORD/NAME` (+ `DATABASE_SSL`) vars, which remain supported |
+| `JWT_SECRET` | yes | random, e.g. `openssl rand -hex 32` |
+| `JWT_EXPIRES_IN` | no | e.g. `15m` |
+| `ENCRYPTION_KEY` | **yes** | key material for AES-256-GCM encryption of prices and contacts. The API refuses to start without it unless `NODE_ENV` is `development`/`test`. **Back it up outside the server** — if it is lost, existing encrypted data cannot be read |
+| `CORS_ORIGIN` | yes | origin of the web app: `http://localhost:3100` while using the tunnel, `https://<domain>` later |
+| `FRONTEND_URL` | yes | base URL for password-reset links; same value as `CORS_ORIGIN` |
+
+Enter secrets on the server directly (e.g. `read -rsp` into the file), never through chat, tickets or git.
+
+### Web — `apps/web/.env.production`
+
+| Variable | Notes |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | **Baked into the bundle at build time** — changing it requires a rebuild. `http://localhost:3101/api` while using the SSH tunnel; `/api` once nginx serves web and API on one domain |
+
+## Environments (`APP_ENV`)
+
+Production is the default in every script. `APP_ENV=staging` makes `main.ts`, `app.module.ts` and `src/config/data-source.ts` load `apps/api/.env.staging` instead of `.env`:
 
 ```bash
 cd apps/api
-
-# Production (default — no flag needed)
-npm run start:dev
-npm run migration:run
-
-# Staging
-npm run start:staging          # nest start with APP_ENV=staging
-npm run migration:run:staging  # migrations against staging only
+npm run start:staging            # nest start with APP_ENV=staging
+npm run migration:run:staging    # migrations against the staging DB only
 npm run migration:revert:staging
 ```
 
-Internally this works by loading `.env.staging` instead of `.env` whenever `APP_ENV=staging` is set (`main.ts`, `app.module.ts`, and `src/config/data-source.ts` all branch on the same variable). No other code path changed.
+Each database has its own `migrations` table, so applying a migration to one never touches the other.
 
-## Migrations tracking
+## First-time server setup
 
-TypeORM's `migrations` table tracks which migration files have been applied per database. Production and staging each have their own `migrations` table — applying a migration on one **never** touches the other.
+1. **OS hardening** (Ubuntu 24.04): SSH keys only (`PermitRootLogin prohibit-password`, `PasswordAuthentication no` in a `sshd_config.d` file that sorts first), `ufw` allowing only SSH (later also 80/443), `fail2ban` for sshd, `unattended-upgrades`. Verify key login in a new session before closing the old one.
+2. **Runtime:** Node 20 LTS (NodeSource apt repo), `git`, `npm i -g pm2`. Never run `pm2` commands as root — that starts a stray root daemon.
+3. **User and directories:**
+   ```bash
+   useradd -m -s /bin/bash tyreterra
+   install -d -o tyreterra -g tyreterra -m 750 /opt/tyreterra
+   install -d -o tyreterra -g www-data  -m 750 /var/www/uploads
+   ```
+4. **Code and build** — as `tyreterra`, started from a directory it can read (e.g. `cd /home/tyreterra`), otherwise npm/PM2 fail with `EACCES`:
+   ```bash
+   cd /home/tyreterra
+   sudo -u tyreterra git clone --branch master https://github.com/OttoOtter-hub/tyreterra-web.git /opt/tyreterra
+   cd /opt/tyreterra
+   sudo -u tyreterra -H npm ci
+   sudo -u tyreterra -H env NODE_OPTIONS=--max-old-space-size=2048 nice -n 10 npm run api:build
+   # write apps/web/.env.production (NEXT_PUBLIC_API_URL) first, then:
+   cd apps/web && sudo -u tyreterra -H env NODE_OPTIONS=--max-old-space-size=2048 NEXT_TELEMETRY_DISABLED=1 nice -n 10 npm run build
+   ```
+   `npm ci` installs dev dependencies too — they are needed for the build and for `migration:run` (ts-node).
+5. **`.env`:** create `apps/api/.env` (see the table above), `chown tyreterra:tyreterra`, `chmod 600`.
+6. **Database schema** — see *Migrations* below.
+7. **First admin:** `src/seed-admin.ts` reads the password only from `SEED_ADMIN_PASSWORD` (no default). Read it hidden inside the `tyreterra` shell so it never appears in `ps` or shell history:
+   ```bash
+   cd /home/tyreterra && sudo -u tyreterra -H bash -c '
+     cd /opt/tyreterra/apps/api
+     read -rsp "Admin password: " P; echo
+     export SEED_ADMIN_PASSWORD="$P"; unset P
+     ./node_modules/.bin/ts-node -T src/seed-admin.ts'
+   ```
+8. **PM2** — `/home/tyreterra/ecosystem.config.js`:
+   ```js
+   module.exports = {
+     apps: [
+       {
+         name: 'tyreterra-api',
+         cwd: '/opt/tyreterra/apps/api',
+         script: 'dist/main.js',
+         max_memory_restart: '600M',
+         node_args: '--max-old-space-size=512',
+       },
+       {
+         name: 'tyreterra-web',
+         cwd: '/opt/tyreterra/apps/web',
+         script: '/opt/tyreterra/node_modules/next/dist/bin/next', // hoisted by npm workspaces
+         args: 'start -p 3100 -H 127.0.0.1',
+         max_memory_restart: '600M',
+         env: { NODE_ENV: 'production', NEXT_TELEMETRY_DISABLED: '1' },
+       },
+     ],
+   };
+   ```
+   ```bash
+   cd /home/tyreterra
+   sudo -u tyreterra -H pm2 start /home/tyreterra/ecosystem.config.js
+   sudo -u tyreterra -H pm2 save
+   pm2 startup systemd -u tyreterra --hp /home/tyreterra   # installs pm2-tyreterra.service
+   ```
 
-> Historical note: migrations 1–6 were originally applied to production via ad-hoc SQL scripts rather than `npm run migration:run`, so the `migrations` table didn't exist yet. Both production and the new staging branch had their tracking tables backfilled with records for migrations 1–6 to reflect actual schema state. From migration 7 onward, always use `npm run migration:run` / `npm run migration:run:staging` — don't hand-run SQL.
+## Migrations
 
-## Creating a new migration
+Schema changes go **only through migrations**. `synchronize` is `false` everywhere: the hand-written migrations differ from the entities in column types and enum names, and a sync would drop and re-add those columns.
+
+```bash
+cd /home/tyreterra && sudo -u tyreterra -H npm --prefix /opt/tyreterra/apps/api run migration:run
+```
+
+The `migrations` table records what has been applied (8 migrations as of 2026-10-20). Before running against an existing database, check that table for pending entries.
+
+Creating a new migration (locally):
 
 ```bash
 cd apps/api
 npm run migration:generate -- src/migrations/DescriptiveName
-# review the generated file, then:
-npm run migration:run             # apply to production
-# or, to test first:
-npm run migration:run:staging     # apply to staging only
+# review the generated SQL, test it on a staging/disposable database, then commit
 ```
 
-Always test a new migration against staging before running it on production.
+## Updating a running deployment
 
-## Deploying the built app (manual — no CI/CD yet)
+```bash
+cd /home/tyreterra
+sudo -u tyreterra git -C /opt/tyreterra pull --ff-only
+sudo -u tyreterra -H npm --prefix /opt/tyreterra ci          # only if package-lock.json changed
+sudo -u tyreterra -H env NODE_OPTIONS=--max-old-space-size=2048 nice -n 10 npm --prefix /opt/tyreterra run api:build
+sudo -u tyreterra -H env NODE_OPTIONS=--max-old-space-size=2048 NEXT_TELEMETRY_DISABLED=1 nice -n 10 npm --prefix /opt/tyreterra/apps/web run build
+sudo -u tyreterra -H npm --prefix /opt/tyreterra/apps/api run migration:run   # if the update contains migrations
+sudo -u tyreterra -H pm2 restart tyreterra-api tyreterra-web
+```
 
-Production deploys are a manual build → scp → pm2 restart cycle (see chat history / future `DEPLOY.md` automation if added). This file only covers **environment selection**, not the deploy script itself.
+Logs: `sudo -u tyreterra -H pm2 logs tyreterra-api` (password-reset links appear here while the mailer is a stub).
+
+## Later: domain, nginx, TLS
+
+Not set up yet. When a domain points at the server:
+
+1. `apt install nginx certbot python3-certbot-nginx`, `ufw allow 'Nginx Full'`.
+2. Site config:
+   ```nginx
+   location /api/     { proxy_pass http://127.0.0.1:3101; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; client_max_body_size 12m; }
+   location /uploads/ { alias /var/www/uploads/; add_header X-Content-Type-Options nosniff; autoindex off; }
+   location /         { proxy_pass http://127.0.0.1:3100; proxy_set_header Host $host; }
+   ```
+   The API trusts exactly one proxy hop (`trust proxy` = 1), so the auth rate limits see the real client IP.
+3. `certbot --nginx -d <domain>`.
+4. Set `CORS_ORIGIN` and `FRONTEND_URL` to `https://<domain>`, rebuild web with `NEXT_PUBLIC_API_URL=/api`, restart both processes.
+
+## Tests
+
+```bash
+npm test     # from the repo root: unit suites + the critical-paths e2e suite
+```
+
+The e2e suite (`apps/api/src/test/critical-paths.e2e.spec.ts`) writes to the database it connects to and runs the migrations first. Point it only at a **disposable** database (e.g. `docker compose up -d` locally) — never staging or production.
