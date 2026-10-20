@@ -7,11 +7,15 @@ dotenv.config({ path: envFile });
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
+  // Behind nginx: take the client IP from X-Forwarded-For (one proxy hop),
+  // otherwise every request is 127.0.0.1 and the auth rate limits are shared by all users.
+  app.set('trust proxy', 1);
   app.setGlobalPrefix('api');
   app.useGlobalPipes(
     new ValidationPipe({
