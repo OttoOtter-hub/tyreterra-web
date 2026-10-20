@@ -16,14 +16,23 @@ async function main() {
     process.exit(1);
   }
 
-  const client = new Client({
-    host: process.env.DATABASE_HOST,
-    port: Number(process.env.DATABASE_PORT ?? 5432),
-    user: process.env.DATABASE_USER,
-    password: process.env.DATABASE_PASSWORD,
-    database: process.env.DATABASE_NAME,
-    ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
-  });
+  // Same precedence as config/data-source.ts: DATABASE_URL first, discrete vars otherwise
+  const connectionUrl = process.env.DATABASE_URL;
+  const client = new Client(
+    connectionUrl
+      ? {
+          connectionString: connectionUrl,
+          ssl: connectionUrl.includes('neon.tech') ? { rejectUnauthorized: false } : false,
+        }
+      : {
+          host: process.env.DATABASE_HOST,
+          port: Number(process.env.DATABASE_PORT ?? 5432),
+          user: process.env.DATABASE_USER,
+          password: process.env.DATABASE_PASSWORD,
+          database: process.env.DATABASE_NAME,
+          ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
+        },
+  );
 
   await client.connect();
 
