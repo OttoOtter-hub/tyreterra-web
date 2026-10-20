@@ -79,9 +79,7 @@ export class OffersService {
 
     // Notify buyer
     const buyerCompany = await this.companyRepo.findOneBy({ id: request.buyer_company_id });
-    const buyerEmail = buyerCompany?.contact_email_encrypted
-      ? this.encryption.decrypt(buyerCompany.contact_email_encrypted)
-      : null;
+    const buyerEmail = this.tryDecrypt(buyerCompany?.contact_email_encrypted);
     if (buyerEmail) {
       await this.email.sendOfferReceived(buyerEmail, request.listing?.size_raw ?? '');
     }
@@ -106,12 +104,13 @@ export class OffersService {
   }
 
   // Buyer views offer (decrypted price)
-  async getOffer(requestId: string, buyer: User): Promise<Offer & { price: number }> {
+  async getOffer(requestId: string, buyer: User): Promise<Offer & { price: number | null }> {
     const request = await this.loadRequest(requestId);
     if (request.buyer_company_id !== buyer.company_id) throw new ForbiddenException();
     if (!request.offer) throw new NotFoundException('No offer yet');
 
-    const price = parseFloat(this.encryption.decrypt(request.offer.price_encrypted));
+    const decrypted = this.tryDecrypt(request.offer.price_encrypted);
+    const price = decrypted === null ? null : parseFloat(decrypted);
     return { ...request.offer, price };
   }
 
@@ -197,13 +196,20 @@ export class OffersService {
   private revealContact(company: Company | null): RevealedContact {
     return {
       company_name: company?.name ?? '',
-      email: company?.contact_email_encrypted
-        ? this.encryption.decrypt(company.contact_email_encrypted)
-        : null,
-      phone: company?.contact_phone_encrypted
-        ? this.encryption.decrypt(company.contact_phone_encrypted)
-        : null,
+      email: this.tryDecrypt(company?.contact_email_encrypted),
+      phone: this.tryDecrypt(company?.contact_phone_encrypted),
     };
+  }
+
+  // Undecryptable data (e.g. encrypted under a previous ENCRYPTION_KEY) reads as
+  // missing instead of failing the whole request — same as listings/requests.
+  private tryDecrypt(ciphertext: string | null | undefined): string | null {
+    if (!ciphertext) return null;
+    try {
+      return this.encryption.decrypt(ciphertext);
+    } catch {
+      return null;
+    }
   }
 
   private async audit(

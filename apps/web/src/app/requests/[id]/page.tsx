@@ -20,7 +20,7 @@ export default function RequestDetailPage() {
   const { user } = useAuth();
   const router = useRouter();
   const [req, setReq] = useState<RequestDetail | null>(null);
-  const [offerData, setOfferData] = useState<{ price: number; currency: string; terms_text: string | null } | null>(null);
+  const [offerData, setOfferData] = useState<{ price: number | null; currency: string; terms_text: string | null } | null>(null);
   const [form, setForm] = useState({ price: '', currency: 'EUR', terms_text: '' });
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
@@ -32,7 +32,7 @@ export default function RequestDetailPage() {
       .then(async (r) => {
         setReq(r);
         if (r.status === 'offered' && r.buyer_company_id === user?.company_id) {
-          const o = await api.get<{ price: number; currency: string; terms_text: string | null }>(`/requests/${id}/offer`);
+          const o = await api.get<{ price: number | null; currency: string; terms_text: string | null }>(`/requests/${id}/offer`);
           setOfferData(o);
         }
       })
@@ -138,7 +138,7 @@ export default function RequestDetailPage() {
         {isBuyer && req.status === 'offered' && offerData && (
           <div className="card">
             <h3 style={{ marginBottom: '1rem' }}>Offer received</h3>
-            <p><strong>Price:</strong> {offerData.price.toLocaleString()} {offerData.currency}</p>
+            <p><strong>Price:</strong> {offerData.price != null ? `${offerData.price.toLocaleString()} ${offerData.currency}` : 'unavailable'}</p>
             {offerData.terms_text && <p><strong>Terms:</strong> {offerData.terms_text}</p>}
             <div style={{ display: 'flex', gap: '.75rem', marginTop: '1rem' }}>
               <button className="btn btn-primary" disabled={acting}
