@@ -8,7 +8,13 @@ export class EncryptionService {
   private readonly key: Buffer;
 
   constructor() {
-    const secret = process.env.ENCRYPTION_KEY ?? 'default-dev-key-change-in-production';
+    // A silently-used fallback key would encrypt real prices/contacts with a known
+    // secret and make existing data unreadable — so outside dev/test the key is required.
+    const devOrTest = ['development', 'test'].includes(process.env.NODE_ENV ?? '');
+    const secret = process.env.ENCRYPTION_KEY || (devOrTest ? 'default-dev-key-change-in-production' : '');
+    if (!secret) {
+      throw new Error('ENCRYPTION_KEY is not set — refusing to start (required unless NODE_ENV is development or test)');
+    }
     // Derive a 32-byte key from the secret using scrypt
     this.key = scryptSync(secret, 'tyreterra-salt', 32);
   }
