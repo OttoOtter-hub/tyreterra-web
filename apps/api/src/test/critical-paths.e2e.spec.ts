@@ -12,7 +12,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import * as request from 'supertest';
 import { randomUUID } from 'crypto';
 import * as bcrypt from 'bcryptjs';
@@ -22,8 +22,10 @@ import { Company } from '../companies/entities/company.entity';
 import { Listing } from '../listings/entities/listing.entity';
 import { EncryptionService } from '../common/encryption.service';
 
-// Integration tests against a real (staging) database — run with:
-//   APP_ENV=staging npm test
+// Integration tests against a real, disposable database (e.g. the local
+// docker-compose Postgres), never staging or production. The schema is built
+// by running the migrations (synchronize is off everywhere), then:
+//   npm test
 // Covers the highest-blast-radius regressions: price leaking to non-owners,
 // soft delete not filtering, auth bypass, contact info leaking pre-deal,
 // and the auth rate limiter from the hardening sprint.
@@ -46,6 +48,9 @@ describe('Critical paths (e2e)', () => {
     const moduleRef: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
+
+    // Same path as production: build the schema with migrations, not synchronize
+    await moduleRef.get(DataSource).runMigrations();
 
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix('api');
