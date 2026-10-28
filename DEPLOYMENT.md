@@ -15,17 +15,20 @@ No real hosts, passwords, keys or connection strings belong in this repo. They e
 | Uploads | `/var/www/uploads` (owner `tyreterra`, group `www-data`, mode 750) — the path is fixed in `deals.controller.ts` |
 | PM2 config | `/home/tyreterra/ecosystem.config.js` |
 | PM2 boot unit | `pm2-tyreterra` (systemd, runs as `tyreterra`) |
+| nginx site | `/etc/nginx/sites-available/tyreterra` (+ `00-catchall`, headers in `/etc/nginx/snippets/tyreterra-headers.conf`) |
+| TLS | Let's Encrypt via `certbot --nginx`, renewed by `certbot.timer` |
 
 | Process | Listens on |
 |---|---|
 | `tyreterra-api` (NestJS) | `127.0.0.1:3101` |
 | `tyreterra-web` (Next.js) | `127.0.0.1:3100` |
 
-Both bind to localhost only; the firewall allows SSH only. Until a domain exists the app is used through an SSH tunnel:
+Both bind to localhost only and are reached through nginx on `https://<domain>`. The firewall allows SSH, 80 and 443; a request by bare IP or an unknown `Host` gets no response (see *Domain, nginx, TLS*).
+
+For debugging without nginx, an SSH tunnel still works (CORS will only accept it if `CORS_ORIGIN` is temporarily the tunnel origin):
 
 ```bash
 ssh -N -L 3100:127.0.0.1:3100 -L 3101:127.0.0.1:3101 root@<server>
-# then open http://localhost:3100
 ```
 
 ## Configuration
@@ -41,7 +44,7 @@ ssh -N -L 3100:127.0.0.1:3100 -L 3101:127.0.0.1:3101 root@<server>
 | `JWT_SECRET` | yes | random, e.g. `openssl rand -hex 32` |
 | `JWT_EXPIRES_IN` | no | e.g. `15m` |
 | `ENCRYPTION_KEY` | **yes** | key material for AES-256-GCM encryption of prices and contacts. The API refuses to start without it unless `NODE_ENV` is `development`/`test`. **Back it up outside the server** — if it is lost, existing encrypted data cannot be read |
-| `CORS_ORIGIN` | yes | origin of the web app: `http://localhost:3100` while using the tunnel, `https://<domain>` later |
+| `CORS_ORIGIN` | yes | origin of the web app: `https://<domain>` |
 | `FRONTEND_URL` | yes | base URL for password-reset links; same value as `CORS_ORIGIN` |
 
 Enter secrets on the server directly (e.g. `read -rsp` into the file), never through chat, tickets or git.
@@ -50,7 +53,7 @@ Enter secrets on the server directly (e.g. `read -rsp` into the file), never thr
 
 | Variable | Notes |
 |---|---|
-| `NEXT_PUBLIC_API_URL` | **Baked into the bundle at build time** — changing it requires a rebuild. `http://localhost:3101/api` while using the SSH tunnel; `/api` once nginx serves web and API on one domain |
+| `NEXT_PUBLIC_API_URL` | **Baked into the bundle at build time** — changing it requires a rebuild. `/api` (nginx serves web and API on one domain); all API calls are made from the browser, so a relative URL works |
 
 ## Environments (`APP_ENV`)
 
@@ -67,7 +70,7 @@ Each database has its own `migrations` table, so applying a migration to one nev
 
 ## First-time server setup
 
-1. **OS hardening** (Ubuntu 24.04): SSH keys only (`PermitRootLogin prohibit-password`, `PasswordAuthentication no` in a `sshd_config.d` file that sorts first), `ufw` allowing only SSH (later also 80/443), `fail2ban` for sshd, `unattended-upgrades`. Verify key login in a new session before closing the old one.
+1. **OS hardening** (Ubuntu 24.04): SSH keys only (`PermitRootLogin prohibit-password`, `PasswordAuthentication no` in a `sshd_config.d` file that sorts first), `ufw` allowing SSH and `Nginx Full` (80/443), `fail2ban` for sshd, `unattended-upgrades`. Verify key login in a new session before closing the old one.
 2. **Runtime:** Node 20 LTS (NodeSource apt repo), `git`, `npm i -g pm2`. Never run `pm2` commands as root — that starts a stray root daemon.
 3. **User and directories:**
    ```bash
@@ -157,20 +160,75 @@ sudo -u tyreterra -H pm2 restart tyreterra-api tyreterra-web
 
 Logs: `sudo -u tyreterra -H pm2 logs tyreterra-api` (password-reset links appear here while the mailer is a stub).
 
-## Later: domain, nginx, TLS
+## Domain, nginx, TLS
 
-Not set up yet. When a domain points at the server:
+The domain's A record points at the server. Setup:
 
 1. `apt install nginx certbot python3-certbot-nginx`, `ufw allow 'Nginx Full'`.
-2. Site config:
+2. `/etc/nginx/snippets/tyreterra-headers.conf` — security headers, included at server level **and** in any location that has its own `add_header` (nginx drops inherited headers there):
    ```nginx
-   location /api/     { proxy_pass http://127.0.0.1:3101; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; client_max_body_size 12m; }
-   location /uploads/ { alias /var/www/uploads/; add_header X-Content-Type-Options nosniff; autoindex off; }
-   location /         { proxy_pass http://127.0.0.1:3100; proxy_set_header Host $host; }
+   add_header X-Content-Type-Options "nosniff" always;
+   add_header X-Frame-Options "DENY" always;
+   add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+   add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+   add_header Strict-Transport-Security "max-age=86400" always;   # raise to 31536000 once HTTPS is stable
+   ```
+   No CSP yet — it has to be tuned for Next.js first.
+3. `/etc/nginx/sites-available/tyreterra` (symlinked into `sites-enabled`):
+   ```nginx
+   server {
+       listen 80;
+       listen [::]:80;
+       server_name <domain>;
+
+       server_tokens off;
+       include /etc/nginx/snippets/tyreterra-headers.conf;
+
+       location /api/ {
+           proxy_pass http://127.0.0.1:3101;
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+           client_max_body_size 12m;
+       }
+
+       location /uploads/ {
+           alias /var/www/uploads/;
+           autoindex off;
+           include /etc/nginx/snippets/tyreterra-headers.conf;
+           add_header Content-Disposition "attachment" always;
+       }
+
+       location / {
+           proxy_pass http://127.0.0.1:3100;
+           proxy_set_header Host $host;
+           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+           proxy_set_header X-Forwarded-Proto $scheme;
+       }
+   }
    ```
    The API trusts exactly one proxy hop (`trust proxy` = 1), so the auth rate limits see the real client IP.
-3. `certbot --nginx -d <domain>`.
-4. Set `CORS_ORIGIN` and `FRONTEND_URL` to `https://<domain>`, rebuild web with `NEXT_PUBLIC_API_URL=/api`, restart both processes.
+4. `/etc/nginx/sites-available/00-catchall` replaces the stock `default` site (remove its symlink), so a request by bare IP or unknown `Host` gets nothing:
+   ```nginx
+   server {
+       listen 80 default_server;
+       listen [::]:80 default_server;
+       server_name _;
+       server_tokens off;
+       return 444;
+   }
+   server {
+       listen 443 ssl default_server;
+       listen [::]:443 ssl default_server;
+       server_name _;
+       ssl_reject_handshake on;
+   }
+   ```
+5. `nginx -t && systemctl reload nginx`.
+6. `certbot --nginx -d <domain> --redirect` — adds the 443 listener and certificate to the site and an HTTP→HTTPS redirect. Check renewal with `certbot renew --dry-run`.
+7. Set `CORS_ORIGIN` and `FRONTEND_URL` to `https://<domain>`, rebuild web with `NEXT_PUBLIC_API_URL=/api`, restart both processes (`pm2 restart ... --update-env`).
+
+The auth rate limits are kept in the API's memory: restarting `tyreterra-api` resets them (e.g. after an admin locks themselves out).
 
 ## Tests
 

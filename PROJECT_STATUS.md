@@ -1,6 +1,6 @@
 # Tyre Terra — Project Status
 
-_Last updated: 2026-10-20_
+_Last updated: 2026-10-28_
 
 B2B marketplace for anonymous TBR/PCR/OTR/AGRI/MH tire exchange across Europe.
 Sellers list inventory, buyers send requests, sellers counter with a price, buyer accepts → deal + in-app chat with file attachments.
@@ -27,14 +27,15 @@ tyreterra/
 
 Manual, no CI/CD, no Docker — see [DEPLOYMENT.md](DEPLOYMENT.md) for the step-by-step.
 
-- Dedicated Ubuntu 24.04 VPS. SSH by key only, firewall allows SSH only, fail2ban on sshd, unattended security upgrades.
+- Dedicated Ubuntu 24.04 VPS. SSH by key only, firewall allows SSH, 80 and 443, fail2ban on sshd, unattended security upgrades.
 - The app runs under an unprivileged `tyreterra` user (no sudo). Code in `/opt/tyreterra`, built **on the server** from a `git clone` of `master`.
 - Process manager: PM2 under the `tyreterra` user only (systemd unit `pm2-tyreterra` resurrects it on boot):
   - `tyreterra-api` — `127.0.0.1:3101`
   - `tyreterra-web` — `127.0.0.1:3100`
   - both with `max_memory_restart: 600M`
-- Both ports listen on **localhost only**. There is no domain, nginx or TLS yet; the app is reached through an SSH tunnel to ports 3100/3101 until a domain is bought.
-- Planned once a domain exists: nginx reverse proxy (`/api/*` → :3101, `/*` → :3100, `/uploads/*` → static files from `/var/www/uploads`) + certbot.
+- Both ports listen on **localhost only**. nginx serves the app on its domain over HTTPS: `/api/*` → :3101, `/*` → :3100, `/uploads/*` → static files from `/var/www/uploads`. HTTP redirects to HTTPS; requests by bare IP or unknown `Host` get no response.
+- TLS: Let's Encrypt via certbot, auto-renewed. Security headers (HSTS, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`) are set by nginx.
+- The web bundle is built with `NEXT_PUBLIC_API_URL=/api` (same origin as the API).
 - Database: Neon PostgreSQL (separate Neon project, schema built from the 8 migrations).
 - File uploads: `/var/www/uploads` (owner `tyreterra`, group `www-data`, mode 750).
 
@@ -72,7 +73,7 @@ Applied only to the auth endpoints, via `@UseGuards(ThrottlerGuard)` + `@Throttl
 | `POST /auth/login` | 5 per 15 minutes |
 | `POST /auth/forgot-password` | 3 per hour |
 
-The API sets `trust proxy` to one hop, so behind nginx the limit applies to the real client IP from `X-Forwarded-For`. Without a proxy (SSH tunnel) every request comes from `127.0.0.1` and shares one bucket.
+The API sets `trust proxy` to one hop, so behind nginx the limit applies to the real client IP from `X-Forwarded-For` (verified on the server: 6th bad login → 429). Requests that bypass nginx (SSH tunnel) all come from `127.0.0.1` and share one bucket. Counters live in API memory, so restarting `tyreterra-api` resets them.
 
 ### Password reset
 - `POST /auth/forgot-password` creates a random 32-byte token, stores only its SHA-256 hash in `password_reset_tokens`, valid for 1 hour.
@@ -252,9 +253,10 @@ All routes prefixed `/api`. JWT bearer required unless noted.
 - Plaintext price never leaves the server except to the listing owner, the seller viewing their own request, or the buyer viewing an offer made to them.
 - `password_hash` is stripped from all admin user-list/detail responses.
 - Rate limiting on register / login / forgot-password (see §2).
-- File uploads: MIME-type allowlist, 10MB cap, UUID-based filenames (no path traversal), stored outside the app directory, to be served read-only by nginx.
+- File uploads: MIME-type allowlist, 10MB cap, UUID-based filenames (no path traversal), stored outside the app directory, served read-only by nginx as downloads (`Content-Disposition: attachment`, `nosniff`, no directory listing).
 - Tire size, location country, condition, segment are server-side validated (`class-validator`).
-- API and web listen on `127.0.0.1` only (API: `HOST`, default `127.0.0.1`); only the reverse proxy / SSH tunnel reaches them.
+- API and web listen on `127.0.0.1` only (API: `HOST`, default `127.0.0.1`); only nginx (or an SSH tunnel for debugging) reaches them.
+- HTTPS only (HTTP → 301), HSTS and other security headers from nginx; no CSP yet.
 - Error pages (`error.tsx`, `global-error.tsx`) show a generic message and the error digest only; details stay in the server log.
 - No credentials, hosts or connection strings are committed; `.env*` files are gitignored.
 
@@ -307,7 +309,8 @@ The e2e suite needs a real **disposable** database (e.g. the local `docker-compo
 
 ## 10. Known gaps / things not implemented
 
-- No domain, nginx or TLS yet — the app is only reachable through an SSH tunnel. Deal-chat attachments (`/uploads/...`) cannot be opened until nginx serves them.
+- No Content-Security-Policy yet (needs tuning for Next.js); HSTS `max-age` is still short (1 day) and should be raised once HTTPS has proven stable.
+- Rate-limit counters are in memory: they reset on every API restart and would not be shared across several API instances.
 - Email is a stub — no real delivery (SendGrid/Postmark not wired); password-reset links are only in the API log.
 - No CI/CD — deploys are manual (`git pull` + build + `pm2 restart` on the server).
 - `POST /auth/reset-password` is not rate-limited (the token itself is 256-bit and single-use).
