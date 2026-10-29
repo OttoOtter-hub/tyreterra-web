@@ -78,11 +78,11 @@ describe('Critical paths (e2e)', () => {
   // /auth/register and the admin approval queue — and crucially does NOT
   // touch the throttled /auth/login endpoint, so test setup never eats into
   // the rate-limit budget the last test deliberately exhausts).
-  async function makeActiveUser(opts: { contactEmail?: string } = {}) {
+  async function makeActiveUser(opts: { contactEmail?: string; country?: string; role?: UserRole } = {}) {
     const company = await companyRepo.save(
       companyRepo.create({
         name: `Test Co ${randomUUID()}`,
-        country: 'DE',
+        country: opts.country ?? 'DE',
         contact_email_encrypted: opts.contactEmail ? encryption.encrypt(opts.contactEmail) : null,
       }),
     );
@@ -92,7 +92,7 @@ describe('Critical paths (e2e)', () => {
       userRepo.create({
         email: `test-${randomUUID()}@example.com`,
         password_hash: await bcrypt.hash('TestPass123!', 4),
-        role: UserRole.DEALER,
+        role: opts.role ?? UserRole.DEALER,
         status: UserStatus.ACTIVE,
         company_id: company.id,
         gdpr_consent: true,
@@ -309,7 +309,124 @@ describe('Critical paths (e2e)', () => {
     });
   });
 
-  // ── 5. Rate limiting ──────────────────────────────────────────────────────
+  // ── 5. Listing visibility ─────────────────────────────────────────────────
+  // One rule (listing-visibility.ts) for the catalogue, GET /listings/:id,
+  // owner actions and creating a request; a hidden listing is always 404.
+  describe('Listing visibility', () => {
+    const brand = `Visibility-${randomUUID().slice(0, 8)}`;
+
+    async function listingOf(seller: { token: string }, extra: Record<string, unknown> = {}) {
+      const res = await request(httpServer)
+        .post('/api/listings')
+        .set('Authorization', `Bearer ${seller.token}`)
+        .send({ ...baseListing, brand, ...extra })
+        .expect(201);
+      createdListingIds.push(res.body.id);
+      return res.body.id as string;
+    }
+
+    const get = (token: string, id: string) =>
+      request(httpServer).get(`/api/listings/${id}`).set('Authorization', `Bearer ${token}`);
+    const inCatalogue = async (token: string, id: string) =>
+      (await request(httpServer).get('/api/listings').query({ brand, limit: 100 })
+        .set('Authorization', `Bearer ${token}`).expect(200)).body.data.some((r: { id: string }) => r.id === id);
+    const requestFor = (token: string, id: string) =>
+      request(httpServer).post('/api/requests').set('Authorization', `Bearer ${token}`).send({ listing_id: id, qty_requested: 1 });
+
+    // Hidden from `viewer` everywhere, while the owner keeps it
+    async function expectHidden(owner: { token: string }, viewer: { token: string }, id: string) {
+      await get(viewer.token, id).expect(404);
+      expect(await inCatalogue(viewer.token, id)).toBe(false);
+      await requestFor(viewer.token, id).expect(404);
+      await request(httpServer).patch(`/api/listings/${id}`).set('Authorization', `Bearer ${viewer.token}`).send({ qty: 1 }).expect(404);
+      await request(httpServer).post(`/api/listings/${id}/deactivate`).set('Authorization', `Bearer ${viewer.token}`).expect(404);
+      await request(httpServer).delete(`/api/listings/${id}`).set('Authorization', `Bearer ${viewer.token}`).expect(404);
+      await get(owner.token, id).expect(200);
+    }
+
+    async function expectVisible(viewer: { token: string }, id: string) {
+      await get(viewer.token, id).expect(200);
+      expect(await inCatalogue(viewer.token, id)).toBe(true);
+    }
+
+    it('hides a listing from companies in the seller country when exclude_own_region is set', async () => {
+      const seller = await makeActiveUser({ country: 'DE' });
+      const id = await listingOf(seller, { exclude_own_region: true });
+      await expectHidden(seller, await makeActiveUser({ country: 'DE' }), id);
+      await expectVisible(await makeActiveUser({ country: 'PL' }), id);
+    });
+
+    it('limits a listing to visible_regions', async () => {
+      const seller = await makeActiveUser({ country: 'DE' });
+      const id = await listingOf(seller, { visible_regions: ['PL', 'CZ'] });
+      await expectHidden(seller, await makeActiveUser({ country: 'FR' }), id);
+      await expectVisible(await makeActiveUser({ country: 'CZ' }), id);
+      await requestFor((await makeActiveUser({ country: 'PL' })).token, id).expect(201);
+    });
+
+    it('limits a listing to allowed_roles', async () => {
+      const seller = await makeActiveUser();
+      const id = await listingOf(seller, { allowed_roles: 'distributor' });
+      await expectHidden(seller, await makeActiveUser({ role: UserRole.DEALER }), id);
+      await expectVisible(await makeActiveUser({ role: UserRole.DISTRIBUTOR }), id);
+    });
+
+    it('shows an inactive or expired listing to its owner only', async () => {
+      const seller = await makeActiveUser();
+      const inactive = await listingOf(seller);
+      await request(httpServer).post(`/api/listings/${inactive}/deactivate`).set('Authorization', `Bearer ${seller.token}`).expect(201);
+      await expectHidden(seller, await makeActiveUser(), inactive);
+
+      const expired = await listingOf(seller);
+      await listingRepo.update(expired, { expires_at: new Date(Date.now() - 60_000) });
+      await expectHidden(seller, await makeActiveUser(), expired);
+
+      // The owner can still act on them
+      await request(httpServer).post(`/api/listings/${inactive}/activate`).set('Authorization', `Bearer ${seller.token}`).expect(201);
+      await request(httpServer).post(`/api/listings/${expired}/renew`).set('Authorization', `Bearer ${seller.token}`).expect(201);
+      await expectVisible(await makeActiveUser(), inactive);
+      await expectVisible(await makeActiveUser(), expired);
+    });
+
+    it('answers 404 for an unknown id and 403 only for a visible listing that is not yours', async () => {
+      const seller = await makeActiveUser();
+      const other = await makeActiveUser({ country: 'PL' });
+      await get(other.token, randomUUID()).expect(404);
+      const id = await listingOf(seller);
+      await request(httpServer).patch(`/api/listings/${id}`).set('Authorization', `Bearer ${other.token}`).send({ qty: 1 }).expect(403);
+    });
+
+    it('never returns the seller company to others, only its country', async () => {
+      const seller = await makeActiveUser({ country: 'DE' });
+      const id = await listingOf(seller);
+      const res = await get((await makeActiveUser({ country: 'PL' })).token, id).expect(200);
+      expect(res.body.company).toBeUndefined();
+      expect(res.body.seller_country).toBe('DE');
+      expect(JSON.stringify(res.body)).not.toContain(seller.company.name);
+      expect((await get(seller.token, id).expect(200)).body.company.name).toBe(seller.company.name);
+    });
+
+    it('keeps an existing request, offer and deal readable for both parties after the listing is hidden', async () => {
+      const seller = await makeActiveUser({ country: 'DE' });
+      const buyer = await makeActiveUser({ country: 'PL' });
+      const id = await listingOf(seller);
+      const req = await requestFor(buyer.token, id).expect(201);
+      await request(httpServer).post(`/api/requests/${req.body.id}/offer`).set('Authorization', `Bearer ${seller.token}`)
+        .send({ price: 100, currency: 'EUR' }).expect(201);
+
+      await request(httpServer).post(`/api/listings/${id}/deactivate`).set('Authorization', `Bearer ${seller.token}`).expect(201);
+      await get(buyer.token, id).expect(404);
+      for (const t of [buyer.token, seller.token]) {
+        const r = await request(httpServer).get(`/api/requests/${req.body.id}`).set('Authorization', `Bearer ${t}`).expect(200);
+        expect(r.body.listing.id).toBe(id);
+      }
+      // A stranger still cannot read the request
+      await request(httpServer).get(`/api/requests/${req.body.id}`)
+        .set('Authorization', `Bearer ${(await makeActiveUser()).token}`).expect(403);
+    });
+  });
+
+  // ── 6. Rate limiting ──────────────────────────────────────────────────────
   // Runs last and in isolation: every prior test in this file authenticates
   // via signed JWTs (see makeActiveUser), never via POST /auth/login, so
   // nothing here has already spent part of the per-IP login quota.

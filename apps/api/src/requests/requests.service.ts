@@ -7,33 +7,34 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Request, RequestStatus } from './entities/request.entity';
-import { Listing, ListingStatus } from '../listings/entities/listing.entity';
+import { ListingStatus } from '../listings/entities/listing.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { User } from '../auth/entities/user.entity';
 import { CreateRequestDto } from './dto/create-request.dto';
 import { EncryptionService } from '../common/encryption.service';
+import { ListingsService } from '../listings/listings.service';
 
 @Injectable()
 export class RequestsService {
   constructor(
     @InjectRepository(Request)
     private readonly requestRepo: Repository<Request>,
-    @InjectRepository(Listing)
-    private readonly listingRepo: Repository<Listing>,
     @InjectRepository(AuditLog)
     private readonly auditRepo: Repository<AuditLog>,
     private readonly encryption: EncryptionService,
+    private readonly listings: ListingsService,
   ) {}
 
   async create(dto: CreateRequestDto, buyer: User): Promise<Request> {
     if (!buyer.company_id) throw new ForbiddenException('No company associated');
 
-    const listing = await this.listingRepo.findOneBy({ id: dto.listing_id });
-    if (!listing || listing.status !== ListingStatus.ACTIVE) {
-      throw new NotFoundException('Listing not found or not active');
-    }
+    // Same visibility as the catalogue: a listing the buyer may not see is 404
+    const listing = await this.listings.findVisible(dto.listing_id, buyer);
     if (listing.company_id === buyer.company_id) {
       throw new BadRequestException('Cannot request your own listing');
+    }
+    if (listing.status !== ListingStatus.ACTIVE || listing.expires_at <= new Date()) {
+      throw new NotFoundException('Listing not found or not active');
     }
 
     const existing = await this.requestRepo.findOne({

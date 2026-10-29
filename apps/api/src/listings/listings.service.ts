@@ -14,6 +14,8 @@ import { AuditLog } from '../audit/entities/audit-log.entity';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
 import { SearchListingDto } from './dto/search-listing.dto';
+import { Company } from '../companies/entities/company.entity';
+import { canSeeListing, isOwner, whereListingVisibleTo } from './listing-visibility';
 
 const LISTING_TTL_DAYS = 30;
 
@@ -55,8 +57,35 @@ export class ListingsService {
     private readonly listingRepo: Repository<Listing>,
     @InjectRepository(AuditLog)
     private readonly auditRepo: Repository<AuditLog>,
+    @InjectRepository(Company)
+    private readonly companyRepo: Repository<Company>,
     private readonly encryption: EncryptionService,
   ) {}
+
+  // A listing by id for this viewer: 404 when it does not exist or the
+  // viewer may not see it (listing-visibility.ts). Loads the seller company.
+  async findVisible(id: string, viewer: User): Promise<Listing> {
+    const listing = await this.listingRepo.findOne({ where: { id }, relations: ['company'] });
+    if (!listing || !(await this.canSee(listing, viewer))) throw new NotFoundException('Listing not found');
+    return listing;
+  }
+
+  private async canSee(listing: Listing, viewer: User): Promise<boolean> {
+    const viewerCompany = viewer.company_id ? await this.companyRepo.findOneBy({ id: viewer.company_id }) : null;
+    const sellerCompany = listing.company ?? await this.companyRepo.findOneBy({ id: listing.company_id });
+    return canSeeListing(listing, viewer, {
+      sellerCountry: sellerCompany?.country ?? null,
+      viewerCountry: viewerCompany?.country ?? null,
+    });
+  }
+
+  // A listing the user is about to change: 404 if they may not even see it,
+  // 403 if they see it but it is not theirs (admins may change any).
+  private async findForChange(id: string, user: User, allowAdmin = true): Promise<Listing> {
+    const listing = await this.findVisible(id, user);
+    if (!isOwner(listing, user) && !(allowAdmin && user.role === UserRole.ADMIN)) throw new ForbiddenException();
+    return listing;
+  }
 
   async create(dto: CreateListingDto, user: User): Promise<Listing> {
     if (!user.company_id) {
@@ -139,9 +168,12 @@ export class ListingsService {
       .leftJoin('c.rating', 'r')
       // §6.1: include seller country and rating; §6.2: never expose company name
       .addSelect(['c.country', 'r.score', 'r.interaction_count'])
+      // The viewer's company (NULL without one), for the region rules
+      .leftJoin(Company, 'vc', 'vc.id = :viewerCompanyId', { viewerCompanyId: viewer.company_id ?? null })
       .where('l.status = :status', { status: ListingStatus.ACTIVE })
       .andWhere('l.deleted_at IS NULL')
       .andWhere('l.expires_at > NOW()');
+    whereListingVisibleTo(qb, 'l', 'c', 'vc', viewer);
 
     if (dto.segment) qb.andWhere('l.segment = :segment', { segment: dto.segment });
     if (dto.tire_type) qb.andWhere('l.tire_type = :tire_type', { tire_type: dto.tire_type });
@@ -183,28 +215,20 @@ export class ListingsService {
   }
 
   async findOne(id: string, viewer: User): Promise<Listing & { price?: number | null }> {
-    const listing = await this.listingRepo.findOne({
-      where: { id },
-      relations: ['company'],
-    });
-    if (!listing || listing.status === ListingStatus.EXPIRED || listing.deleted_at) {
-      throw new NotFoundException('Listing not found');
-    }
-    this.assertVisible(listing, viewer);
+    const listing = await this.findVisible(id, viewer);
     const sanitised = this.sanitise(listing);
     // Return decrypted price only to the owner
-    if (viewer.company_id && listing.company_id === viewer.company_id) {
+    if (isOwner(listing, viewer)) {
       return this.withDecryptedPrice(sanitised);
     }
-    return sanitised;
+    // §6.2: others get the seller's country, never the company itself (name,
+    // VAT number, contacts)
+    const { company, ...rest } = sanitised as Listing & { company?: Company };
+    return { ...rest, seller_country: company?.country ?? null } as unknown as Listing;
   }
 
   async update(id: string, dto: UpdateListingDto, user: User): Promise<Listing> {
-    const listing = await this.listingRepo.findOneBy({ id, deleted_at: IsNull() });
-    if (!listing) throw new NotFoundException('Listing not found');
-
-    const isAdmin = user.role === UserRole.ADMIN;
-    if (!isAdmin && listing.company_id !== user.company_id) throw new ForbiddenException();
+    const listing = await this.findForChange(id, user);
 
     const { size, ...rest } = dto;
 
@@ -248,10 +272,7 @@ export class ListingsService {
   }
 
   async activate(id: string, user: User): Promise<{ message: string }> {
-    const listing = await this.listingRepo.findOneBy({ id, deleted_at: IsNull() });
-    if (!listing) throw new NotFoundException('Listing not found');
-    const isAdmin = user.role === UserRole.ADMIN;
-    if (!isAdmin && listing.company_id !== user.company_id) throw new ForbiddenException();
+    const listing = await this.findForChange(id, user);
 
     listing.status = ListingStatus.ACTIVE;
     const expires_at = new Date();
@@ -263,10 +284,7 @@ export class ListingsService {
   }
 
   async deactivate(id: string, user: User): Promise<{ message: string }> {
-    const listing = await this.listingRepo.findOneBy({ id, deleted_at: IsNull() });
-    if (!listing) throw new NotFoundException('Listing not found');
-    const isAdmin = user.role === UserRole.ADMIN;
-    if (!isAdmin && listing.company_id !== user.company_id) throw new ForbiddenException();
+    const listing = await this.findForChange(id, user);
 
     listing.status = ListingStatus.INACTIVE;
     await this.listingRepo.save(listing);
@@ -287,10 +305,7 @@ export class ListingsService {
   // Soft delete — preserves audit trail and dispute history. Sets deleted_at
   // and status=inactive instead of removing the row.
   async hardDelete(id: string, user: User): Promise<{ message: string }> {
-    const listing = await this.listingRepo.findOneBy({ id, deleted_at: IsNull() });
-    if (!listing) throw new NotFoundException('Listing not found');
-    const isAdmin = user.role === UserRole.ADMIN;
-    if (!isAdmin && listing.company_id !== user.company_id) throw new ForbiddenException();
+    const listing = await this.findForChange(id, user);
 
     listing.deleted_at = new Date();
     listing.status = ListingStatus.INACTIVE;
@@ -348,9 +363,7 @@ export class ListingsService {
   }
 
   async renew(id: string, user: User): Promise<Listing> {
-    const listing = await this.listingRepo.findOneBy({ id, deleted_at: IsNull() });
-    if (!listing) throw new NotFoundException('Listing not found');
-    if (listing.company_id !== user.company_id) throw new ForbiddenException();
+    const listing = await this.findForChange(id, user, false);
 
     const expires_at = new Date();
     expires_at.setDate(expires_at.getDate() + LISTING_TTL_DAYS);
@@ -396,10 +409,6 @@ export class ListingsService {
     const copy = { ...listing } as Record<string, unknown>;
     for (const f of HIDDEN_FIELDS) delete copy[f];
     return copy as unknown as Listing;
-  }
-
-  private assertVisible(_listing: Listing, _viewer: User): void {
-    // Roles removed — all authenticated users see all listings
   }
 
   private withDecryptedPrice(listing: Listing): Listing & { price: number | null; currency: string | null } {

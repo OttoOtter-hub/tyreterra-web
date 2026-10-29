@@ -117,9 +117,9 @@ id, email (unique), password_hash, role (`dealer`/`distributor`/`admin`), status
 | condition | enum | `new, used, retreaded` |
 | price_internal_encrypted | text, nullable | AES-256-GCM encrypted; **owner-only** |
 | price_currency | char(3), nullable | |
-| visible_regions | text[], nullable | unused by current UI |
+| visible_regions | text[], nullable | enforced when set (viewer company country must be listed); no UI sets it yet |
 | exclude_own_region | boolean | hide from own country |
-| allowed_roles | enum | `all/dealer/distributor` — field kept, not enforced |
+| allowed_roles | enum | `all/dealer/distributor` — enforced (listing-visibility.ts); the UI always sends `all` |
 | status | enum | `active, inactive, expired` |
 | expires_at | timestamptz | 30-day TTL from creation/renewal |
 | deleted_at | timestamptz, nullable | soft delete marker (indexed) |
@@ -203,8 +203,11 @@ All routes prefixed `/api`. JWT bearer required unless noted.
 - `GET /export` — Excel download of own listings
 - `GET /import/template` — Excel template download
 - `POST /import` — bulk-create from uploaded `.xlsx`; **aborts entirely on first row error**, returns row number + message
-- `GET /?segment=&tire_type=&brand=&size_raw=&location_country=&condition=&qty_min=&min_rating=&page=&limit=` — catalogue search (active, non-deleted listings only, no price)
-- `GET /:id` — single listing; returns decrypted `price`/`currency` only if viewer owns it
+- `GET /?segment=&tire_type=&brand=&size_raw=&location_country=&condition=&qty_min=&min_rating=&page=&limit=` — catalogue search (active, non-deleted, non-expired listings the viewer may see, no price)
+- `GET /:id` — single listing; owner gets decrypted `price`/`currency` and the company, everyone else `seller_country` only (never the company name, VAT or contacts)
+
+**Visibility** (`listings/listing-visibility.ts`, one rule for the catalogue, `GET /:id`, owner actions and `POST /requests`): deleted — nobody; owner and admins — always; others — status active and not expired, `allowed_roles` is `all` or the viewer role, not `exclude_own_region` with the viewer company in the seller country, and the viewer company country in `visible_regions` when that is set. A listing the viewer may not see is **404**, never 403; 403 only for a visible listing that is not theirs. Existing requests, offers and deals stay readable for both parties after a listing is hidden.
+
 - `PATCH /:id` — update (owner or admin); re-parses size if provided
 - `POST /bulk-action` — `{ids, action: 'delete'|'deactivate'|'activate'}` (owner or admin); `delete` is soft
 - `POST /:id/activate` / `POST /:id/deactivate` — single-item status toggle
@@ -316,7 +319,7 @@ The e2e suite needs a real **disposable** database (e.g. the local `docker-compo
 - `POST /auth/reset-password` is not rate-limited (the token itself is 256-bit and single-use).
 - The password reset flow has no automated tests yet.
 - Migrations and entity definitions differ cosmetically (types, enum/index names); `synchronize` must stay off. A cleanup migration could align them.
-- `dealer`/`distributor` role distinction removed from logic but DB enum/columns retained.
-- `visible_regions` column exists but no UI sets or reads it.
+- `dealer`/`distributor`: users still carry the role; listings can be limited by `allowed_roles` (enforced), but no UI sets it.
+- `visible_regions` is enforced but no UI sets it yet.
 - Single admin account (created with `seed-admin.ts`), no admin invite flow.
 - Planned future work: Distributor Orders module and role reintroduction — see `docs/future/`.
