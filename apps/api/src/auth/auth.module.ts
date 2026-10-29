@@ -9,7 +9,6 @@ import { User } from './entities/user.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { Company } from '../companies/entities/company.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
-import { EmailService } from '../common/email.service';
 
 @Module({
   imports: [
@@ -23,7 +22,7 @@ import { EmailService } from '../common/email.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, EmailService],
+  providers: [AuthService, JwtStrategy],
   exports: [AuthService, JwtModule],
 })
 export class AuthModule {}

@@ -128,6 +128,15 @@ export class Listing {
   @Column({ type: 'timestamptz', name: 'expires_at' })
   expires_at: Date;
 
+  // When the owner was emailed about this listing expiring soon / having
+  // expired. Guards the nightly job against repeats; cleared whenever
+  // expires_at is pushed forward (renew / activate).
+  @Column({ type: 'timestamptz', nullable: true, name: 'expiry_reminder_sent_at' })
+  expiry_reminder_sent_at: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true, name: 'expired_notice_sent_at' })
+  expired_notice_sent_at: Date | null;
+
   @OneToMany(() => Request, (request) => request.listing)
   requests: Request[];
 

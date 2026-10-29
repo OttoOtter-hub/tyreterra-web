@@ -10,7 +10,8 @@ import { Company } from '../companies/entities/company.entity';
 import { Listing, ListingStatus } from '../listings/entities/listing.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { RatingsService } from '../ratings/ratings.service';
-import { EmailService } from '../common/email.service';
+import { EmailService } from '../common/email/email.service';
+import { accountApprovedEmail, accountRejectedEmail } from '../common/email/email-templates';
 import { ApproveUserDto, ApprovalAction } from './dto/approve-user.dto';
 import { AuditLogQueryDto } from './dto/audit-log-query.dto';
 
@@ -61,9 +62,12 @@ export class AdminService {
       admin.id, userId, { reason: dto.reason },
     );
 
-    // Email notification (§2.2)
-    // Stub — replace with actual email when EmailService is wired to SendGrid
-    this.email.sendOfferReceived(user.email, dto.action).catch(() => {});
+    // Email notification (§2.2). The rejection reason stays in the audit log only.
+    if (dto.action === ApprovalAction.APPROVE) {
+      await this.email.send(user.email, 'account-approved', accountApprovedEmail(this.email.link('/login')));
+    } else {
+      await this.email.send(user.email, 'account-rejected', accountRejectedEmail());
+    }
 
     return this.sanitiseUser(saved);
   }

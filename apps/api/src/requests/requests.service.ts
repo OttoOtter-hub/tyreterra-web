@@ -12,6 +12,8 @@ import { AuditLog } from '../audit/entities/audit-log.entity';
 import { User } from '../auth/entities/user.entity';
 import { CreateRequestDto } from './dto/create-request.dto';
 import { EncryptionService } from '../common/encryption.service';
+import { EmailService } from '../common/email/email.service';
+import { newRequestEmail } from '../common/email/email-templates';
 
 @Injectable()
 export class RequestsService {
@@ -23,6 +25,7 @@ export class RequestsService {
     @InjectRepository(AuditLog)
     private readonly auditRepo: Repository<AuditLog>,
     private readonly encryption: EncryptionService,
+    private readonly email: EmailService,
   ) {}
 
   async create(dto: CreateRequestDto, buyer: User): Promise<Request> {
@@ -58,6 +61,12 @@ export class RequestsService {
     await this.audit('request.created', buyer.id, request.id, {
       listing_id: listing.id, qty: dto.qty_requested,
     });
+
+    await this.email.sendToCompany(
+      listing.company_id,
+      'new-request',
+      newRequestEmail(this.email.link(`/requests/${request.id}`)),
+    );
 
     return request;
   }

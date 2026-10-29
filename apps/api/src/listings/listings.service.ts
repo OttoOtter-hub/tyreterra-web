@@ -257,6 +257,8 @@ export class ListingsService {
     const expires_at = new Date();
     expires_at.setDate(expires_at.getDate() + 30);
     listing.expires_at = expires_at;
+    listing.expiry_reminder_sent_at = null;
+    listing.expired_notice_sent_at = null;
     await this.listingRepo.save(listing);
 
     return { message: 'Listing activated' };
@@ -336,6 +338,8 @@ export class ListingsService {
         const exp = new Date();
         exp.setDate(exp.getDate() + 30);
         l.expires_at = exp;
+        l.expiry_reminder_sent_at = null;
+        l.expired_notice_sent_at = null;
         await this.listingRepo.save(l);
       } else {
         l.status = ListingStatus.INACTIVE;
@@ -355,6 +359,8 @@ export class ListingsService {
     const expires_at = new Date();
     expires_at.setDate(expires_at.getDate() + LISTING_TTL_DAYS);
     listing.expires_at = expires_at;
+    listing.expiry_reminder_sent_at = null;
+    listing.expired_notice_sent_at = null;
     listing.status = ListingStatus.ACTIVE;
     const saved = await this.listingRepo.save(listing);
 

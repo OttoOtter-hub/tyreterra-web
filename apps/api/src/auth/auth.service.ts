@@ -14,7 +14,8 @@ import { User, UserStatus } from './entities/user.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { Company } from '../companies/entities/company.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
-import { EmailService } from '../common/email.service';
+import { EmailService } from '../common/email/email.service';
+import { adminNewRegistrationEmail, passwordResetEmail } from '../common/email/email-templates';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -76,6 +77,11 @@ export class AuthService {
         target_type: 'user',
         payload: { email: user.email, role: user.role, company_id: company.id },
       }),
+    );
+
+    await this.email.sendToAdmin(
+      'admin-new-registration',
+      adminNewRegistrationEmail(this.email.link('/admin/users')),
     );
 
     return { message: 'Registration successful. Your account is pending admin approval.' };
@@ -143,8 +149,10 @@ export class AuthService {
       this.resetTokenRepo.create({ user_id: user.id, token_hash, expires_at }),
     );
 
-    const resetUrl = `${process.env.FRONTEND_URL ?? 'http://localhost:3000'}/reset-password?token=${rawToken}`;
-    await this.email.sendPasswordReset(user.email, resetUrl);
+    // The outcome is deliberately ignored: the response must be the same
+    // whether or not delivery worked (EmailService logs failures itself).
+    const resetUrl = this.email.link(`/reset-password?token=${rawToken}`);
+    await this.email.send(user.email, 'password-reset', passwordResetEmail(resetUrl));
 
     await this.auditRepo.save(
       this.auditRepo.create({

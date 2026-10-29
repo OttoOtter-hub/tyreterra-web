@@ -11,6 +11,7 @@ import { OffersModule } from './offers/offers.module';
 import { DealsModule } from './deals/deals.module';
 import { RatingsModule } from './ratings/ratings.module';
 import { AdminModule } from './admin/admin.module';
+import { EmailModule } from './common/email/email.module';
 import { databaseConfig } from './config/database.config';
 
 @Module({
@@ -30,6 +31,7 @@ import { databaseConfig } from './config/database.config';
       throttlers: [{ name: 'default', ttl: 60_000, limit: 1000 }],
       setHeaders: true,
     }),
+    EmailModule,
     AuthModule,
     VatModule,
     ListingsModule,

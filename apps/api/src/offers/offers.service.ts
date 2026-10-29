@@ -14,7 +14,8 @@ import { Company } from '../companies/entities/company.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { User } from '../auth/entities/user.entity';
 import { EncryptionService } from '../common/encryption.service';
-import { EmailService } from '../common/email.service';
+import { EmailService } from '../common/email/email.service';
+import { dealCreatedEmail, offerReceivedEmail, requestDeclinedEmail } from '../common/email/email-templates';
 import { CreateOfferDto } from './dto/create-offer.dto';
 
 export interface RevealedContact {
@@ -77,12 +78,11 @@ export class OffersService {
 
     await this.audit('offer.sent', seller.id, offer.id, { request_id: requestId });
 
-    // Notify buyer
-    const buyerCompany = await this.companyRepo.findOneBy({ id: request.buyer_company_id });
-    const buyerEmail = this.tryDecrypt(buyerCompany?.contact_email_encrypted);
-    if (buyerEmail) {
-      await this.email.sendOfferReceived(buyerEmail, request.listing?.size_raw ?? '');
-    }
+    await this.email.sendToCompany(
+      request.buyer_company_id,
+      'offer-received',
+      offerReceivedEmail(this.email.link(`/requests/${requestId}`)),
+    );
 
     return offer;
   }
@@ -99,6 +99,12 @@ export class OffersService {
     request.status = RequestStatus.REJECTED;
     const saved = await this.requestRepo.save(request);
     await this.audit('request.declined', seller.id, requestId, {});
+
+    await this.email.sendToCompany(
+      request.buyer_company_id,
+      'request-declined',
+      requestDeclinedEmail(this.email.link(`/requests/${requestId}`)),
+    );
 
     return saved;
   }
@@ -152,12 +158,12 @@ export class OffersService {
       buyer: this.revealContact(buyerCompany),
     };
 
-    // Email both parties
-    const sellerEmail = result.seller.email;
-    const buyerEmail = result.buyer.email;
-    if (sellerEmail && buyerEmail) {
-      await this.email.sendDealAccepted(sellerEmail, buyerEmail, request.listing.size_raw);
-    }
+    // Email both parties — the contacts themselves stay in the app
+    const dealEmail = dealCreatedEmail(this.email.link(`/deals/${deal.id}`));
+    await Promise.all([
+      this.email.sendToCompany(request.listing.company_id, 'deal-created', dealEmail),
+      this.email.sendToCompany(request.buyer_company_id, 'deal-created', dealEmail),
+    ]);
 
     return result;
   }

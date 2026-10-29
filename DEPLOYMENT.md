@@ -45,7 +45,10 @@ ssh -N -L 3100:127.0.0.1:3100 -L 3101:127.0.0.1:3101 root@<server>
 | `JWT_EXPIRES_IN` | no | e.g. `15m` |
 | `ENCRYPTION_KEY` | **yes** | key material for AES-256-GCM encryption of prices and contacts. The API refuses to start without it unless `NODE_ENV` is `development`/`test`. **Back it up outside the server** — if it is lost, existing encrypted data cannot be read |
 | `CORS_ORIGIN` | yes | origin of the web app: `https://<domain>` |
-| `FRONTEND_URL` | yes | base URL for password-reset links; same value as `CORS_ORIGIN` |
+| `FRONTEND_URL` | yes | base URL for links in emails (password reset, requests, deals); same value as `CORS_ORIGIN` |
+| `RESEND_API_KEY` | **yes** | Resend API key (sending access). The API refuses to start without it unless `NODE_ENV` is `development`/`test`, where emails are only logged |
+| `EMAIL_FROM` | **yes** | sender, e.g. `Tyre Terra <noreply@mail.<domain>>`; its domain must be verified in Resend |
+| `ADMIN_NOTIFY_EMAIL` | no | receives "new registration awaiting approval"; unset → that email is skipped |
 
 Enter secrets on the server directly (e.g. `read -rsp` into the file), never through chat, tickets or git.
 
@@ -136,7 +139,7 @@ Schema changes go **only through migrations**. `synchronize` is `false` everywhe
 cd /home/tyreterra && sudo -u tyreterra -H npm --prefix /opt/tyreterra/apps/api run migration:run
 ```
 
-The `migrations` table records what has been applied (8 migrations as of 2026-10-20). Before running against an existing database, check that table for pending entries.
+The `migrations` table records what has been applied (9 migrations as of 2026-10-28). Before running against an existing database, check that table for pending entries.
 
 Creating a new migration (locally):
 
@@ -158,7 +161,22 @@ sudo -u tyreterra -H npm --prefix /opt/tyreterra/apps/api run migration:run   # 
 sudo -u tyreterra -H pm2 restart tyreterra-api tyreterra-web
 ```
 
-Logs: `sudo -u tyreterra -H pm2 logs tyreterra-api` (password-reset links appear here while the mailer is a stub).
+Logs: `sudo -u tyreterra -H pm2 logs tyreterra-api`. Email sends and failures are logged by kind with a masked recipient; bodies and reset links are never logged in production.
+
+## Email (Resend)
+
+1. In Resend, add the sending domain (e.g. `mail.<domain>`) and create the DNS records it shows (SPF/DKIM, optional DMARC) at the DNS provider; wait until Resend shows the domain as verified.
+2. Create an API key with **sending access** only.
+3. On the server, write the key into `apps/api/.env` without echoing it, then add `EMAIL_FROM` (and `ADMIN_NOTIFY_EMAIL`). Keep the file `600`:
+   ```bash
+   cd /home/tyreterra && sudo -u tyreterra -H bash -c '
+     cd /opt/tyreterra/apps/api
+     read -rsp "Resend API key: " K; echo
+     printf "RESEND_API_KEY=%s\n" "$K" >> .env; unset K'
+   ```
+4. Restart the API (`pm2 restart tyreterra-api --update-env`). Once a key is configured the API will not start without it.
+
+Listing expiry reminders run nightly at 03:00 server time (after the ratings job at 02:00).
 
 ## Domain, nginx, TLS
 

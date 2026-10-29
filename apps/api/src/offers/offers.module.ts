@@ -8,12 +8,11 @@ import { Deal } from '../deals/entities/deal.entity';
 import { Company } from '../companies/entities/company.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { EncryptionService } from '../common/encryption.service';
-import { EmailService } from '../common/email.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Offer, Request, Deal, Company, AuditLog])],
   controllers: [OffersController],
-  providers: [OffersService, EncryptionService, EmailService],
+  providers: [OffersService, EncryptionService],
   exports: [OffersService, EncryptionService],
 })
 export class OffersModule {}

@@ -7,7 +7,6 @@ import { Company } from '../companies/entities/company.entity';
 import { Listing } from '../listings/entities/listing.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { RatingsModule } from '../ratings/ratings.module';
-import { EmailService } from '../common/email.service';
 import { ListingsExportService } from '../listings/listings-export.service';
 
 @Module({
@@ -16,6 +15,6 @@ import { ListingsExportService } from '../listings/listings-export.service';
     RatingsModule,
   ],
   controllers: [AdminController],
-  providers: [AdminService, EmailService, ListingsExportService],
+  providers: [AdminService, ListingsExportService],
 })
 export class AdminModule {}

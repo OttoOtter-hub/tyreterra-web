@@ -36,7 +36,7 @@ Manual, no CI/CD, no Docker — see [DEPLOYMENT.md](DEPLOYMENT.md) for the step-
 - Both ports listen on **localhost only**. nginx serves the app on its domain over HTTPS: `/api/*` → :3101, `/*` → :3100, `/uploads/*` → static files from `/var/www/uploads`. HTTP redirects to HTTPS; requests by bare IP or unknown `Host` get no response.
 - TLS: Let's Encrypt via certbot, auto-renewed. Security headers (HSTS, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`) are set by nginx.
 - The web bundle is built with `NEXT_PUBLIC_API_URL=/api` (same origin as the API).
-- Database: Neon PostgreSQL (separate Neon project, schema built from the 8 migrations).
+- Database: Neon PostgreSQL (separate Neon project, schema built from the migrations).
 - File uploads: `/var/www/uploads` (owner `tyreterra`, group `www-data`, mode 750).
 
 ---
@@ -56,7 +56,7 @@ Manual, no CI/CD, no Docker — see [DEPLOYMENT.md](DEPLOYMENT.md) for the step-
 | `ratings/` | Seller rating, recalculated from deal history (nightly cron at 02:00 + on demand) |
 | `vat/` | EU VIES VAT number validation |
 | `audit/` | Append-only audit log (every state-changing action writes here) |
-| `common/` | `EncryptionService` (AES-256-GCM), tire size parser, email service (stub) |
+| `common/` | `EncryptionService` (AES-256-GCM), tire size parser, `email/` (Resend `EmailService` + templates) |
 
 ### Auth & roles
 - JWT bearer auth (`JwtAuthGuard`), `AdminGuard` for `/admin/*`.
@@ -79,7 +79,25 @@ The API sets `trust proxy` to one hop, so behind nginx the limit applies to the 
 - `POST /auth/forgot-password` creates a random 32-byte token, stores only its SHA-256 hash in `password_reset_tokens`, valid for 1 hour.
 - `POST /auth/reset-password` accepts the token once (`used_at` is set) and invalidates the user's other open tokens.
 - The reset link is built from `FRONTEND_URL` (`/reset-password?token=…`).
-- **Emails are not sent yet:** `EmailService` is a stub that writes the message — including the reset link — to the API log (`pm2 logs tyreterra-api`). The same applies to offer/deal notifications.
+- The link is emailed (see *Email notifications*). The response is the same whether the email exists or delivery worked, so it does not reveal registered addresses.
+
+### Email notifications (`common/email/`)
+- Sent through **Resend** (`RESEND_API_KEY`, sender `EMAIL_FROM`). Without the key the API refuses to start, except in `NODE_ENV=development`/`test`, where `EmailService` is a stub that only logs (the development stub also prints the body, e.g. the reset link).
+- Templates (`email-templates.ts`) are English, plain HTML + a text version, no external images. They state only that something happened and link into the app — **no prices, company names or contacts of the other party**, to keep the marketplace anonymous.
+
+| Event | Recipient | Link |
+|---|---|---|
+| Password reset (link valid 1 h) | the user | `/reset-password?token=…` |
+| Account approved / rejected | the user | `/login` (approved only; the rejection reason stays in the audit log) |
+| New request on a listing | seller | `/requests/:id` |
+| Offer received / request declined by seller | buyer | `/requests/:id` |
+| Deal created (offer accepted) | both sides | `/deals/:id` — contacts are shown there, not in the email |
+| Listings expiring within 3 days / expired | seller, one email per company with a count | `/listings` |
+| New registration awaiting approval | `ADMIN_NOTIFY_EMAIL` (skipped if unset) | `/admin/users` |
+
+- Company emails go to the account email of the company's active user, not the encrypted company contact.
+- A failed send never fails the user's request: `EmailService` catches it and logs the email kind and a masked recipient only — never the body or tokens. In production the log shows only that a reset email was sent, not the link.
+- Listing expiry: nightly job `ListingExpiryNotifier` at 03:00. `expiry_reminder_sent_at` / `expired_notice_sent_at` on `listings` prevent repeats; they are set only after a successful send and cleared on renew / activate.
 
 ### Soft delete (listings)
 - `DELETE /listings/:id`, bulk action `delete` and admin `DELETE /admin/listings/:id` set `deleted_at` (and `status = inactive`) instead of removing the row, so audit trail and deal history stay intact.
@@ -122,6 +140,7 @@ id, email (unique), password_hash, role (`dealer`/`distributor`/`admin`), status
 | allowed_roles | enum | `all/dealer/distributor` — field kept, not enforced |
 | status | enum | `active, inactive, expired` |
 | expires_at | timestamptz | 30-day TTL from creation/renewal |
+| expiry_reminder_sent_at / expired_notice_sent_at | timestamptz, nullable | when the owner was emailed about expiry; cleared on renew/activate |
 | deleted_at | timestamptz, nullable | soft delete marker (indexed) |
 | created_at / updated_at | timestamptz | |
 
@@ -298,7 +317,10 @@ All routes prefixed `/api`. JWT bearer required unless noted.
 
 | Suite | Type | Covers |
 |---|---|---|
-| `auth/auth.service.spec.ts` | unit | registration (duplicate email, pending status, password hashing), login (wrong credentials, pending/blocked accounts) |
+| `auth/auth.service.spec.ts` | unit | registration (duplicate email, pending status, password hashing), login (wrong credentials, pending/blocked accounts); with a failing email client: forgot-password still answers generically, register still succeeds, no token in logs |
+| `common/email/email.service.spec.ts` | unit | Resend mocked: start-up check (production needs key + sender), dev/test stub, payload, failures return false instead of throwing, nothing sensitive logged, company/admin recipients |
+| `common/email/email-templates.spec.ts` | unit | every template: subject, HTML + text, app link (escaped), no external resources, no price/contact data |
+| `listings/listing-expiry-notifier.spec.ts` | unit | 3-day window query, one email per company, marking only after a successful send, job never throws |
 | `common/tire-size.parser.spec.ts` | unit | all 6 size formats + invalid input |
 | `vat/vat.service.spec.ts` | unit | VIES lookup, 24 h cache, input normalisation, VIES unavailable |
 | `test/critical-paths.e2e.spec.ts` | integration | price never leaks to non-owners, soft delete hides rows, auth guards (401, pending/blocked login), contact reveal only after deal, login rate limit (429) |
@@ -311,10 +333,10 @@ The e2e suite needs a real **disposable** database (e.g. the local `docker-compo
 
 - No Content-Security-Policy yet (needs tuning for Next.js); HSTS `max-age` is still short (1 day) and should be raised once HTTPS has proven stable.
 - Rate-limit counters are in memory: they reset on every API restart and would not be shared across several API instances.
-- Email is a stub — no real delivery (SendGrid/Postmark not wired); password-reset links are only in the API log.
+- Users cannot opt out of notification emails yet.
 - No CI/CD — deploys are manual (`git pull` + build + `pm2 restart` on the server).
 - `POST /auth/reset-password` is not rate-limited (the token itself is 256-bit and single-use).
-- The password reset flow has no automated tests yet.
+- The password reset flow has unit tests only for its email side; token use/expiry has no automated tests yet.
 - Migrations and entity definitions differ cosmetically (types, enum/index names); `synchronize` must stay off. A cleanup migration could align them.
 - `dealer`/`distributor` role distinction removed from logic but DB enum/columns retained.
 - `visible_regions` column exists but no UI sets or reads it.
