@@ -6,9 +6,10 @@ import { Request } from './entities/request.entity';
 import { Listing } from '../listings/entities/listing.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { EncryptionService } from '../common/encryption.service';
+import { ListingsModule } from '../listings/listings.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Request, Listing, AuditLog])],
+  imports: [TypeOrmModule.forFeature([Request, Listing, AuditLog]), ListingsModule],
   controllers: [RequestsController],
   providers: [RequestsService, EncryptionService],
   exports: [RequestsService],

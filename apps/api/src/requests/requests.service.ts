@@ -7,33 +7,35 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Request, RequestStatus } from './entities/request.entity';
-import { Listing, ListingStatus } from '../listings/entities/listing.entity';
+import { ListingStatus } from '../listings/entities/listing.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { User } from '../auth/entities/user.entity';
 import { CreateRequestDto } from './dto/create-request.dto';
 import { EncryptionService } from '../common/encryption.service';
+import { ListingsService } from '../listings/listings.service';
+import { serializeRequest, SerializedRequest } from '../common/serializers';
 
 @Injectable()
 export class RequestsService {
   constructor(
     @InjectRepository(Request)
     private readonly requestRepo: Repository<Request>,
-    @InjectRepository(Listing)
-    private readonly listingRepo: Repository<Listing>,
     @InjectRepository(AuditLog)
     private readonly auditRepo: Repository<AuditLog>,
     private readonly encryption: EncryptionService,
+    private readonly listings: ListingsService,
   ) {}
 
   async create(dto: CreateRequestDto, buyer: User): Promise<Request> {
     if (!buyer.company_id) throw new ForbiddenException('No company associated');
 
-    const listing = await this.listingRepo.findOneBy({ id: dto.listing_id });
-    if (!listing || listing.status !== ListingStatus.ACTIVE) {
-      throw new NotFoundException('Listing not found or not active');
-    }
+    // Same visibility as the catalogue: a listing the buyer may not see is 404
+    const listing = await this.listings.findVisible(dto.listing_id, buyer);
     if (listing.company_id === buyer.company_id) {
       throw new BadRequestException('Cannot request your own listing');
+    }
+    if (listing.status !== ListingStatus.ACTIVE || listing.expires_at <= new Date()) {
+      throw new NotFoundException('Listing not found or not active');
     }
 
     const existing = await this.requestRepo.findOne({
@@ -63,9 +65,9 @@ export class RequestsService {
   }
 
   // Incoming requests — seller sees requests on their listings
-  async findIncoming(seller: User): Promise<Request[]> {
+  async findIncoming(seller: User): Promise<SerializedRequest[]> {
     if (!seller.company_id) return [];
-    return this.requestRepo
+    const requests = await this.requestRepo
       .createQueryBuilder('r')
       .innerJoin('r.listing', 'l')
       .where('l.company_id = :cid', { cid: seller.company_id })
@@ -73,19 +75,21 @@ export class RequestsService {
       .leftJoinAndSelect('r.listing', 'listing')
       .orderBy('r.created_at', 'DESC')
       .getMany();
+    return requests.map(r => serializeRequest(r, seller, this.encryption));
   }
 
   // Outgoing requests — buyer sees their own requests
-  async findOutgoing(buyer: User): Promise<Request[]> {
+  async findOutgoing(buyer: User): Promise<SerializedRequest[]> {
     if (!buyer.company_id) return [];
-    return this.requestRepo.find({
+    const requests = await this.requestRepo.find({
       where: { buyer_company_id: buyer.company_id },
       relations: ['listing', 'offer'],
       order: { created_at: 'DESC' },
     });
+    return requests.map(r => serializeRequest(r, buyer, this.encryption));
   }
 
-  async findOne(id: string, user: User): Promise<Request & { listing_price?: number | null; listing_currency?: string | null }> {
+  async findOne(id: string, user: User): Promise<SerializedRequest & { listing_price?: number | null; listing_currency?: string | null }> {
     const request = await this.requestRepo.findOne({
       where: { id },
       relations: ['listing', 'offer', 'offer.deal'],
@@ -93,19 +97,14 @@ export class RequestsService {
     if (!request) throw new NotFoundException('Request not found');
     this.assertAccess(request, user);
 
-    // If the viewer is the seller, expose decrypted listing price
+    // serializeListing gives the seller (the listing owner) the decrypted
+    // price; the request page reads it as listing_price / listing_currency
+    const serialized = serializeRequest(request, user, this.encryption);
     const isSeller = user.company_id && request.listing?.company_id === user.company_id;
-    if (isSeller && request.listing?.price_internal_encrypted) {
-      let listing_price: number | null = null;
-      try {
-        listing_price = parseFloat(this.encryption.decrypt(request.listing.price_internal_encrypted));
-      } catch { listing_price = null; }
-      return Object.assign(request, {
-        listing_price,
-        listing_currency: request.listing.price_currency,
-      });
+    if (isSeller && serialized.listing?.price != null) {
+      return { ...serialized, listing_price: serialized.listing.price, listing_currency: serialized.listing.currency };
     }
-    return request;
+    return serialized;
   }
 
   async cancel(id: string, buyer: User): Promise<Request> {

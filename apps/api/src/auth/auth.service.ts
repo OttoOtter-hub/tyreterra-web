@@ -15,6 +15,7 @@ import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { Company } from '../companies/entities/company.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { EmailService } from '../common/email.service';
+import { serializeCompany, PublicCompany } from '../common/serializers';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -113,14 +114,14 @@ export class AuthService {
     return { access_token: this.jwtService.sign(payload) };
   }
 
-  async getProfile(userId: string): Promise<Omit<User, 'password_hash'> & { company: Company | null }> {
+  async getProfile(userId: string): Promise<Omit<User, 'password_hash' | 'company'> & { company: PublicCompany | null }> {
     const user = await this.userRepo.findOne({
       where: { id: userId },
       relations: ['company'],
     });
     if (!user) throw new UnauthorizedException();
-    const { password_hash, ...profile } = user;
-    return { ...profile, company: user.company ?? null };
+    const { password_hash, company, ...profile } = user;
+    return { ...profile, company: company ? serializeCompany(company) : null };
   }
 
   // Always returns a generic message regardless of whether the email exists,

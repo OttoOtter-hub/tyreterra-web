@@ -3,19 +3,22 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Deal, DealStatus } from './entities/deal.entity';
 import { User } from '../auth/entities/user.entity';
+import { EncryptionService } from '../common/encryption.service';
+import { serializeDeal, SerializedDeal } from '../common/serializers';
 
 @Injectable()
 export class DealsService {
   constructor(
     @InjectRepository(Deal)
     private readonly dealRepo: Repository<Deal>,
+    private readonly encryption: EncryptionService,
   ) {}
 
   // Lists all deals the user is a participant in (as buyer or seller)
-  async findMine(user: User): Promise<Deal[]> {
+  async findMine(user: User): Promise<SerializedDeal[]> {
     if (!user.company_id) return [];
 
-    return this.dealRepo
+    const deals = await this.dealRepo
       .createQueryBuilder('d')
       .innerJoin('d.offer', 'o')
       .innerJoin('o.request', 'req')
@@ -28,9 +31,10 @@ export class DealsService {
       .leftJoinAndSelect('request.buyer_company', 'buyer_company')
       .orderBy('d.accepted_at', 'DESC')
       .getMany();
+    return deals.map(d => serializeDeal(d, user, this.encryption));
   }
 
-  async findOne(id: string, viewer: User): Promise<Deal> {
+  async findOne(id: string, viewer: User): Promise<SerializedDeal> {
     const deal = await this.dealRepo.findOne({
       where: { id },
       relations: [
@@ -41,10 +45,10 @@ export class DealsService {
     });
     if (!deal) throw new NotFoundException('Deal not found');
     this.assertParticipant(deal, viewer);
-    return deal;
+    return serializeDeal(deal, viewer, this.encryption);
   }
 
-  async confirmReceipt(id: string, user: User): Promise<Deal> {
+  async confirmReceipt(id: string, user: User): Promise<SerializedDeal> {
     const deal = await this.dealRepo.findOne({
       where: { id },
       relations: ['offer', 'offer.request'],
@@ -61,7 +65,7 @@ export class DealsService {
 
     deal.status = DealStatus.COMPLETED;
     deal.completed_at = new Date();
-    return this.dealRepo.save(deal);
+    return serializeDeal(await this.dealRepo.save(deal), user, this.encryption);
   }
 
   private assertParticipant(deal: Deal, user: User): void {

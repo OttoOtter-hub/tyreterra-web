@@ -11,8 +11,11 @@ import { Listing, ListingStatus } from '../listings/entities/listing.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { RatingsService } from '../ratings/ratings.service';
 import { EmailService } from '../common/email.service';
+import { serializeCompany, PublicCompany } from '../common/serializers';
 import { ApproveUserDto, ApprovalAction } from './dto/approve-user.dto';
 import { AuditLogQueryDto } from './dto/audit-log-query.dto';
+
+type SafeUser = Omit<User, 'password_hash' | 'company'> & { company?: PublicCompany };
 
 @Injectable()
 export class AdminService {
@@ -31,7 +34,7 @@ export class AdminService {
 
   // ── User approval queue (§10) ────────────────────────────────────────────
 
-  async getPendingUsers(): Promise<Omit<User, 'password_hash'>[]> {
+  async getPendingUsers(): Promise<SafeUser[]> {
     const users = await this.userRepo.find({
       where: { status: UserStatus.PENDING },
       relations: ['company'],
@@ -40,7 +43,7 @@ export class AdminService {
     return users.map(this.sanitiseUser);
   }
 
-  async approveOrReject(userId: string, dto: ApproveUserDto, admin: User): Promise<Omit<User, 'password_hash'>> {
+  async approveOrReject(userId: string, dto: ApproveUserDto, admin: User): Promise<SafeUser> {
     const user = await this.userRepo.findOne({ where: { id: userId }, relations: ['company'] });
     if (!user) throw new NotFoundException('User not found');
     if (user.status !== UserStatus.PENDING) {
@@ -70,7 +73,7 @@ export class AdminService {
 
   // ── Block / unblock ──────────────────────────────────────────────────────
 
-  async blockUser(userId: string, admin: User): Promise<Omit<User, 'password_hash'>> {
+  async blockUser(userId: string, admin: User): Promise<SafeUser> {
     const user = await this.userRepo.findOneBy({ id: userId });
     if (!user) throw new NotFoundException('User not found');
     user.status = UserStatus.BLOCKED;
@@ -79,7 +82,7 @@ export class AdminService {
     return this.sanitiseUser(saved);
   }
 
-  async unblockUser(userId: string, admin: User): Promise<Omit<User, 'password_hash'>> {
+  async unblockUser(userId: string, admin: User): Promise<SafeUser> {
     const user = await this.userRepo.findOneBy({ id: userId });
     if (!user) throw new NotFoundException('User not found');
     user.status = UserStatus.ACTIVE;
@@ -88,7 +91,7 @@ export class AdminService {
     return this.sanitiseUser(saved);
   }
 
-  async setRole(userId: string, role: UserRole, admin: User): Promise<Omit<User, 'password_hash'>> {
+  async setRole(userId: string, role: UserRole, admin: User): Promise<SafeUser> {
     const user = await this.userRepo.findOneBy({ id: userId });
     if (!user) throw new NotFoundException('User not found');
     user.role = role;
@@ -111,14 +114,14 @@ export class AdminService {
 
   // ── VAT verification override (§10) ─────────────────────────────────────
 
-  async overrideVat(companyId: string, admin: User): Promise<Company> {
+  async overrideVat(companyId: string, admin: User): Promise<PublicCompany> {
     const company = await this.companyRepo.findOneBy({ id: companyId });
     if (!company) throw new NotFoundException('Company not found');
     company.vat_verified = true;
     company.vat_verified_at = new Date();
     const saved = await this.companyRepo.save(company);
     await this.writeAudit('admin.vat.override', admin.id, companyId, { target_type: 'company' });
-    return saved;
+    return serializeCompany(saved);
   }
 
   // ── Audit log viewer ─────────────────────────────────────────────────────
@@ -175,8 +178,10 @@ export class AdminService {
     return { message: `Rating recalculated for company ${companyId}` };
   }
 
-  private sanitiseUser(user: User): Omit<User, 'password_hash'> {
+  private sanitiseUser(user: User): SafeUser {
     const { password_hash, ...safe } = user;
+    // The company is loaded only for the approval queue
+    if (safe.company) return { ...safe, company: serializeCompany(safe.company) };
     return safe;
   }
 
