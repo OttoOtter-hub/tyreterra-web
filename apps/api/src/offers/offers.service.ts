@@ -16,6 +16,7 @@ import { User } from '../auth/entities/user.entity';
 import { EncryptionService } from '../common/encryption.service';
 import { EmailService } from '../common/email.service';
 import { CreateOfferDto } from './dto/create-offer.dto';
+import { serializeOffer, serializeRequest, SerializedOffer, SerializedRequest } from '../common/serializers';
 
 export interface RevealedContact {
   company_name: string;
@@ -48,7 +49,7 @@ export class OffersService {
   ) {}
 
   // Seller sends offer on a pending request
-  async sendOffer(requestId: string, dto: CreateOfferDto, seller: User): Promise<Offer> {
+  async sendOffer(requestId: string, dto: CreateOfferDto, seller: User): Promise<SerializedOffer> {
     const request = await this.loadRequest(requestId);
     this.assertSeller(request, seller);
 
@@ -84,11 +85,11 @@ export class OffersService {
       await this.email.sendOfferReceived(buyerEmail, request.listing?.size_raw ?? '');
     }
 
-    return offer;
+    return serializeOffer(offer, seller, this.encryption);
   }
 
   // Seller declines a request
-  async declineRequest(requestId: string, seller: User): Promise<TireRequest> {
+  async declineRequest(requestId: string, seller: User): Promise<SerializedRequest> {
     const request = await this.loadRequest(requestId);
     this.assertSeller(request, seller);
 
@@ -100,18 +101,16 @@ export class OffersService {
     const saved = await this.requestRepo.save(request);
     await this.audit('request.declined', seller.id, requestId, {});
 
-    return saved;
+    return serializeRequest(saved, seller, this.encryption);
   }
 
   // Buyer views offer (decrypted price)
-  async getOffer(requestId: string, buyer: User): Promise<Offer & { price: number | null }> {
+  async getOffer(requestId: string, buyer: User): Promise<SerializedOffer> {
     const request = await this.loadRequest(requestId);
     if (request.buyer_company_id !== buyer.company_id) throw new ForbiddenException();
     if (!request.offer) throw new NotFoundException('No offer yet');
 
-    const decrypted = this.tryDecrypt(request.offer.price_encrypted);
-    const price = decrypted === null ? null : parseFloat(decrypted);
-    return { ...request.offer, price };
+    return serializeOffer(request.offer, buyer, this.encryption);
   }
 
   // Buyer accepts → creates Deal, reveals contacts (§7.2)
@@ -201,15 +200,8 @@ export class OffersService {
     };
   }
 
-  // Undecryptable data (e.g. encrypted under a previous ENCRYPTION_KEY) reads as
-  // missing instead of failing the whole request — same as listings/requests.
   private tryDecrypt(ciphertext: string | null | undefined): string | null {
-    if (!ciphertext) return null;
-    try {
-      return this.encryption.decrypt(ciphertext);
-    } catch {
-      return null;
-    }
+    return this.encryption.tryDecrypt(ciphertext);
   }
 
   private async audit(

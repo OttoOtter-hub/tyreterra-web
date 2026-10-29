@@ -253,7 +253,8 @@ All routes prefixed `/api`. JWT bearer required unless noted.
 
 - Passwords: bcrypt, 12 rounds.
 - Prices and company contacts: AES-256-GCM via `EncryptionService`, key derived from `ENCRYPTION_KEY` (scrypt). **`ENCRYPTION_KEY` is mandatory:** the API refuses to start without it unless `NODE_ENV` is `development` or `test`. Losing the key makes existing encrypted data unreadable; such fields are returned as empty (`null`) instead of failing the request.
-- Plaintext price never leaves the server except to the listing owner, the seller viewing their own request, or the buyer viewing an offer made to them.
+- Plaintext price never leaves the server except to the listing owner, the seller viewing their own request, or the two parties of an offer / deal.
+- Ciphertext never leaves the server: every response with a listing, request, offer, deal or company goes through `common/serializers.ts`, which drops `price_internal_encrypted`, `price_currency` (the owner gets it as `currency`), `price_encrypted` and the `contact_*_encrypted` fields. Contacts are revealed decrypted only in the `POST /offer/accept` response. The e2e suite checks every listing-returning endpoint for these fields.
 - `password_hash` is stripped from all admin user-list/detail responses.
 - Rate limiting on register / login / forgot-password (see §2).
 - File uploads: MIME-type allowlist, 10MB cap, UUID-based filenames (no path traversal), stored outside the app directory, served read-only by nginx as downloads (`Content-Disposition: attachment`, `nosniff`, no directory listing).
@@ -304,7 +305,8 @@ All routes prefixed `/api`. JWT bearer required unless noted.
 | `auth/auth.service.spec.ts` | unit | registration (duplicate email, pending status, password hashing), login (wrong credentials, pending/blocked accounts) |
 | `common/tire-size.parser.spec.ts` | unit | all 6 size formats + invalid input |
 | `vat/vat.service.spec.ts` | unit | VIES lookup, 24 h cache, input normalisation, VIES unavailable |
-| `test/critical-paths.e2e.spec.ts` | integration | price never leaks to non-owners, soft delete hides rows, auth guards (401, pending/blocked login), contact reveal only after deal, login rate limit (429) |
+| `common/serializers.spec.ts` | unit | response serializers: owner-only price, no ciphertext or contacts, nested request/offer/deal |
+| `test/critical-paths.e2e.spec.ts` | integration | price never leaks to non-owners, soft delete hides rows, auth guards (401, pending/blocked login), contact reveal only after deal, listing visibility, no secret fields or ciphertext in any listing-returning endpoint, login rate limit (429) |
 
 The e2e suite needs a real **disposable** database (e.g. the local `docker-compose.yml` Postgres) — never staging or production. It builds the schema by running the migrations before the app starts.
 

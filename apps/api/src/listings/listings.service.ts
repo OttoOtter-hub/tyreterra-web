@@ -16,6 +16,7 @@ import { UpdateListingDto } from './dto/update-listing.dto';
 import { SearchListingDto } from './dto/search-listing.dto';
 import { Company } from '../companies/entities/company.entity';
 import { canSeeListing, isOwner, whereListingVisibleTo } from './listing-visibility';
+import { serializeListing, SerializedListing } from '../common/serializers';
 
 const LISTING_TTL_DAYS = 30;
 
@@ -46,9 +47,6 @@ export interface CatalogueItem {
   created_at: Date;
   expires_at: Date;
 }
-
-// Fields never returned in catalogue responses (§6.2)
-const HIDDEN_FIELDS: (keyof Listing)[] = ['price_internal_encrypted', 'price_currency'];
 
 @Injectable()
 export class ListingsService {
@@ -87,7 +85,7 @@ export class ListingsService {
     return listing;
   }
 
-  async create(dto: CreateListingDto, user: User): Promise<Listing> {
+  async create(dto: CreateListingDto, user: User): Promise<SerializedListing> {
     if (!user.company_id) {
       throw new ForbiddenException('User has no associated company');
     }
@@ -146,16 +144,16 @@ export class ListingsService {
       }),
     );
 
-    return this.sanitise(listing);
+    return serializeListing(listing, user, this.encryption);
   }
 
-  async findMine(user: User): Promise<(Listing & { price?: number | null })[]> {
+  async findMine(user: User): Promise<SerializedListing[]> {
     if (!user.company_id) return [];
     const listings = await this.listingRepo.find({
       where: { company_id: user.company_id, deleted_at: IsNull() },
       order: { created_at: 'DESC' },
     });
-    return listings.map(l => this.withDecryptedPrice(l));
+    return listings.map(l => serializeListing(l, user, this.encryption));
   }
 
   async search(dto: SearchListingDto, viewer: User): Promise<{ data: CatalogueItem[]; total: number }> {
@@ -214,20 +212,18 @@ export class ListingsService {
     return { data: rows.map((r) => this.toCatalogueItem(r)), total };
   }
 
-  async findOne(id: string, viewer: User): Promise<Listing & { price?: number | null }> {
+  async findOne(id: string, viewer: User): Promise<SerializedListing | Omit<SerializedListing, 'company'> & { seller_country: string | null }> {
     const listing = await this.findVisible(id, viewer);
-    const sanitised = this.sanitise(listing);
-    // Return decrypted price only to the owner
-    if (isOwner(listing, viewer)) {
-      return this.withDecryptedPrice(sanitised);
-    }
+    // The owner gets the decrypted price (serializeListing)
+    const serialized = serializeListing(listing, viewer, this.encryption);
+    if (isOwner(listing, viewer)) return serialized;
     // §6.2: others get the seller's country, never the company itself (name,
     // VAT number, contacts)
-    const { company, ...rest } = sanitised as Listing & { company?: Company };
-    return { ...rest, seller_country: company?.country ?? null } as unknown as Listing;
+    const { company, ...rest } = serialized;
+    return { ...rest, seller_country: company?.country ?? null };
   }
 
-  async update(id: string, dto: UpdateListingDto, user: User): Promise<Listing> {
+  async update(id: string, dto: UpdateListingDto, user: User): Promise<SerializedListing> {
     const listing = await this.findForChange(id, user);
 
     const { size, ...rest } = dto;
@@ -268,7 +264,7 @@ export class ListingsService {
       }),
     );
 
-    return this.sanitise(saved);
+    return serializeListing(saved, user, this.encryption);
   }
 
   async activate(id: string, user: User): Promise<{ message: string }> {
@@ -362,7 +358,7 @@ export class ListingsService {
     return { affected };
   }
 
-  async renew(id: string, user: User): Promise<Listing> {
+  async renew(id: string, user: User): Promise<SerializedListing> {
     const listing = await this.findForChange(id, user, false);
 
     const expires_at = new Date();
@@ -371,7 +367,7 @@ export class ListingsService {
     listing.status = ListingStatus.ACTIVE;
     const saved = await this.listingRepo.save(listing);
 
-    return this.sanitise(saved);
+    return serializeListing(saved, user, this.encryption);
   }
 
   private toCatalogueItem(l: Listing): CatalogueItem {
@@ -402,24 +398,5 @@ export class ListingsService {
       created_at: l.created_at,
       expires_at: l.expires_at,
     };
-  }
-
-  // Strips price and other hidden fields before returning to callers (§6.2)
-  private sanitise(listing: Listing): Listing {
-    const copy = { ...listing } as Record<string, unknown>;
-    for (const f of HIDDEN_FIELDS) delete copy[f];
-    return copy as unknown as Listing;
-  }
-
-  private withDecryptedPrice(listing: Listing): Listing & { price: number | null; currency: string | null } {
-    let price: number | null = null;
-    try {
-      if (listing.price_internal_encrypted) {
-        price = parseFloat(this.encryption.decrypt(listing.price_internal_encrypted));
-      }
-    } catch { price = null; }
-    // Remove encrypted field, expose plaintext price
-    const { price_internal_encrypted, ...rest } = listing as unknown as Record<string, unknown>;
-    return { ...rest, price, currency: (listing as unknown as Record<string, unknown>).price_currency as string | null } as unknown as Listing & { price: number | null; currency: string | null };
   }
 }

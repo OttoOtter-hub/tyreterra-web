@@ -37,4 +37,15 @@ export class EncryptionService {
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(enc), decipher.final()]).toString('utf8');
   }
+
+  // Undecryptable data (e.g. encrypted under a previous ENCRYPTION_KEY) reads as
+  // missing instead of failing the whole request.
+  tryDecrypt(ciphertext: string | null | undefined): string | null {
+    if (!ciphertext) return null;
+    try {
+      return this.decrypt(ciphertext);
+    } catch {
+      return null;
+    }
+  }
 }

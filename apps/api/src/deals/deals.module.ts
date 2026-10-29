@@ -5,11 +5,12 @@ import { DealsController } from './deals.controller';
 import { Deal } from './entities/deal.entity';
 import { Message } from '../messages/entities/message.entity';
 import { MessagesService } from '../messages/messages.service';
+import { EncryptionService } from '../common/encryption.service';
 
 @Module({
   imports: [TypeOrmModule.forFeature([Deal, Message])],
   controllers: [DealsController],
-  providers: [DealsService, MessagesService],
+  providers: [DealsService, MessagesService, EncryptionService],
   exports: [DealsService],
 })
 export class DealsModule {}
