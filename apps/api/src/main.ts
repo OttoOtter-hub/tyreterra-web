@@ -9,14 +9,16 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { applyBodyLimits } from './body-limits';
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
 
   // Behind nginx: take the client IP from X-Forwarded-For (one proxy hop),
   // otherwise every request is 127.0.0.1 and the auth rate limits are shared by all users.
   app.set('trust proxy', 1);
   app.setGlobalPrefix('api');
+  applyBodyLimits(app);
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

@@ -1,4 +1,4 @@
-import { parseTireSize, TireSizeParseError } from './tire-size.parser';
+import { parseTireSize, TireSizeParseError } from './strict';
 
 describe('parseTireSize', () => {
   // ─── §4.1 Format: Metric radial ──────────────────────────────────────────

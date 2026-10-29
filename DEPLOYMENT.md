@@ -89,6 +89,7 @@ Each database has its own `migrations` table, so applying a migration to one nev
    cd apps/web && sudo -u tyreterra -H env NODE_OPTIONS=--max-old-space-size=2048 NEXT_TELEMETRY_DISABLED=1 nice -n 10 npm run build
    ```
    `npm ci` installs dev dependencies too — they are needed for the build and for `migration:run` (ts-node).
+   Both builds first compile the shared tire size package `packages/tire-size` (`@tyreterra/tire-size`, used by API and web) through their `prebuild` scripts; no separate step is needed. `npm run size:build` builds it alone.
 5. **`.env`:** create `apps/api/.env` (see the table above), `chown tyreterra:tyreterra`, `chmod 600`.
 6. **Database schema** — see *Migrations* below.
 7. **First admin:** `src/seed-admin.ts` reads the password only from `SEED_ADMIN_PASSWORD` (no default). Read it hidden inside the `tyreterra` shell so it never appears in `ps` or shell history:
@@ -136,7 +137,7 @@ Schema changes go **only through migrations**. `synchronize` is `false` everywhe
 cd /home/tyreterra && sudo -u tyreterra -H npm --prefix /opt/tyreterra/apps/api run migration:run
 ```
 
-The `migrations` table records what has been applied (8 migrations as of 2026-10-20). Before running against an existing database, check that table for pending entries.
+The `migrations` table records what has been applied (8 migrations as of 2026-10-20). The smart import branch adds 1750000000009 (listing_sizes, backfilled from listings), 1750000000010 (parsed load index columns + comment, backfilled by parsing `load_index`) , 1750000000011 (import tables) and 1750000000012 ("x" size diameter column; dot-less inch widths such as 1800R25 re-read as inches); they run on a database with data, and down migrations drop exactly what they added. Before running against an existing database, check that table for pending entries.
 
 Creating a new migration (locally):
 
@@ -233,7 +234,7 @@ The auth rate limits are kept in the API's memory: restarting `tyreterra-api` re
 ## Tests
 
 ```bash
-npm test     # from the repo root: unit suites + the critical-paths e2e suite
+npm test     # from the repo root: tire size package suites, then API unit suites + the critical-paths e2e suite
 ```
 
 The e2e suite (`apps/api/src/test/critical-paths.e2e.spec.ts`) writes to the database it connects to and runs the migrations first. Point it only at a **disposable** database (e.g. `docker compose up -d` locally) — never staging or production.

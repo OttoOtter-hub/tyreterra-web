@@ -21,7 +21,8 @@ import { ListingsExportService } from './listings-export.service';
 import { ListingsImportService } from './listings-import.service';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
-import { SearchListingDto } from './dto/search-listing.dto';
+import { SearchListingDto, SizeSuggestDto } from './dto/search-listing.dto';
+import { ThrottlerGuard, Throttle } from '@nestjs/throttler';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { User } from '../auth/entities/user.entity';
 
@@ -77,6 +78,15 @@ export class ListingsController {
   @Get()
   search(@Query() dto: SearchListingDto, @Request() req: { user: User }) {
     return this.listingsService.search(dto, req.user);
+  }
+
+  // Size autocomplete for the catalogue search box. Declared before ':id'.
+  // Sizes and counts only. Per-IP limit generous enough for debounced typing.
+  @Get('size-suggest')
+  @UseGuards(ThrottlerGuard)
+  @Throttle({ default: { limit: 60, ttl: 10_000 } })
+  suggestSizes(@Query() dto: SizeSuggestDto, @Request() req: { user: User }) {
+    return this.listingsService.suggestSizes(dto.q, req.user);
   }
 
   @Get(':id')

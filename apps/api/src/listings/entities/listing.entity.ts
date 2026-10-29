@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { Company } from '../../companies/entities/company.entity';
 import { Request } from '../../requests/entities/request.entity';
+import { ListingSize } from './listing-size.entity';
 
 export enum TireSegment {
   TBR = 'TBR',
@@ -65,11 +66,35 @@ export class Listing {
   @Column({ type: 'numeric', precision: 5, scale: 1, nullable: true, name: 'size_aspect_ratio' })
   size_aspect_ratio: number | null;
 
+  // Parsed from load_index by the shared parser (null when not readable)
+  @Column({ type: 'smallint', nullable: true, name: 'load_index_single' })
+  load_index_single: number | null;
+
+  @Column({ type: 'varchar', length: 3, nullable: true, name: 'speed_single' })
+  speed_single: string | null;
+
+  @Column({ type: 'smallint', nullable: true, name: 'load_index_dual' })
+  load_index_dual: number | null;
+
+  @Column({ type: 'varchar', length: 3, nullable: true, name: 'speed_dual' })
+  speed_dual: string | null;
+
+  @Column({ type: 'smallint', nullable: true, name: 'ply_rating' })
+  ply_rating: number | null;
+
+  // Seller note shown with the listing
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  comment: string | null;
+
   @Column({ type: 'varchar', length: 1, name: 'size_construction' })
   size_construction: string;
 
   @Column({ type: 'numeric', precision: 5, scale: 1, name: 'size_rim' })
   size_rim: number;
+
+  // Outer diameter, inches — only "x" sizes (28x9-15)
+  @Column({ type: 'numeric', precision: 5, scale: 2, nullable: true, name: 'size_outer_diameter' })
+  size_outer_diameter: number | null;
 
   @Column({ type: 'varchar', length: 30, name: 'size_raw' })
   size_raw: string;
@@ -130,6 +155,10 @@ export class Listing {
 
   @OneToMany(() => Request, (request) => request.listing)
   requests: Request[];
+
+  // All sizes, position 0 = the main size above (listing_sizes)
+  @OneToMany(() => ListingSize, (size) => size.listing)
+  sizes: ListingSize[];
 
   @Column({ type: 'timestamptz', nullable: true, name: 'deleted_at' })
   deleted_at: Date | null;

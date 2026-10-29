@@ -13,8 +13,10 @@ import {
   Length,
   Matches,
   ArrayMinSize,
+  ArrayMaxSize,
 } from 'class-validator';
 import { TireSegment, TireCondition, AllowedRoles } from '../entities/listing.entity';
+import { MAX_ADDITIONAL_SIZES } from '../listing-sizes';
 
 export class UpdateListingDto {
   // Size re-parses size_width/size_rim/size_construction when provided
@@ -23,6 +25,15 @@ export class UpdateListingDto {
   @MinLength(3)
   @MaxLength(30)
   size?: string;
+
+  // Replaces all additional sizes when given ([] removes them)
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_ADDITIONAL_SIZES)
+  @IsString({ each: true })
+  @MaxLength(30, { each: true })
+  additional_sizes?: string[];
+
   @IsOptional()
   @IsEnum(TireSegment)
   segment?: TireSegment;
@@ -105,4 +116,15 @@ export class UpdateListingDto {
   @IsOptional()
   @IsEnum(AllowedRoles)
   allowed_roles?: AllowedRoles;
+
+  // Seller note shown with the listing
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  comment?: string;
+
+  // The sizes sit on different rims and the seller confirmed that this is right
+  @IsOptional()
+  @IsBoolean()
+  confirm_rim_mismatch?: boolean;
 }

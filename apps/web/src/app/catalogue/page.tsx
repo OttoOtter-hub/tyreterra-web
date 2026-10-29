@@ -7,6 +7,7 @@ import TireInfo, { TireListing } from '../../components/TireInfo';
 import { useAuth } from '../../contexts/AuthContext';
 import { api } from '../../lib/api';
 import { countryByCode } from '../../lib/countries';
+import SizeSearchBox, { SizeSuggestion } from '../../components/SizeSearchBox';
 
 const SEGMENTS = ['', 'TBR', 'PCR', 'OTR', 'AGRI', 'MH'];
 const CONDITIONS = ['', 'new', 'used', 'retreaded'];
@@ -34,6 +35,9 @@ interface CatalogueRow extends TireListing {
   id: string;
   company_id: string;
   size_raw: string;
+  additional_sizes?: string[];
+  /** Which of the listing's sizes matched a size search */
+  matched_size?: string | null;
   brand: string;
   segment: string;
   qty: number;
@@ -41,11 +45,41 @@ interface CatalogueRow extends TireListing {
   location_country: string;
   seller_rating: number | null | undefined;
   created_at: string;
+  comment?: string | null;
 }
 
 interface SearchResult {
   data: CatalogueRow[];
   total: number;
+  /** Sizes close to `q` when nothing matched it */
+  nearest?: SizeSuggestion[];
+}
+
+const EMPTY_FILTERS = {
+  segment: '', tire_type: '', brand: '', q: '', location_country: '',
+  condition: '', qty_min: '', ply_rating: '', load_index_min: '', page: 1,
+};
+type Filters = typeof EMPTY_FILTERS;
+
+// Filters ⇄ URL query, so a search can be shared as a link. The old `size_raw`
+// parameter is read as `q` (the new parser understands every form it did).
+function filtersFromUrl(search: string): Filters {
+  const p = new URLSearchParams(search);
+  const f: Filters = { ...EMPTY_FILTERS };
+  for (const k of Object.keys(EMPTY_FILTERS) as (keyof Filters)[]) {
+    const v = p.get(k);
+    if (v === null) continue;
+    if (k === 'page') f.page = Math.max(1, parseInt(v, 10) || 1);
+    else f[k] = v;
+  }
+  if (!f.q && p.get('size_raw')) f.q = p.get('size_raw')!;
+  return f;
+}
+
+function filtersToQuery(f: Filters): string {
+  const params = new URLSearchParams();
+  Object.entries(f).forEach(([k, v]) => { if (v !== '' && v !== 1) params.set(k, String(v)); });
+  return params.toString();
 }
 
 function Stars({ score }: { score: number | null | undefined }) {
@@ -60,17 +94,24 @@ export default function CataloguePage() {
   const [results, setResults] = useState<SearchResult>({ data: [], total: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [filters, setFilters] = useState({
-    segment: '', tire_type: '', brand: '', size_raw: '', location_country: '',
-    condition: '', qty_min: '', page: 1,
-  });
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  // What is typed in the size box; becomes filters.q on Enter / a suggestion
+  const [sizeInput, setSizeInput] = useState('');
+  const [ready, setReady] = useState(false);
+
+  // Read the initial search from the URL (client-only page)
+  useEffect(() => {
+    const f = filtersFromUrl(window.location.search);
+    setFilters(f);
+    setSizeInput(f.q);
+    setReady(true);
+  }, []);
 
   const search = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const params = new URLSearchParams();
-      Object.entries(filters).forEach(([k, v]) => { if (v !== '' && v !== 1) params.set(k, String(v)); });
-      const data = await api.get<SearchResult>(`/listings?${params}`);
+      const query = filtersToQuery(filters);
+      const data = await api.get<SearchResult>(`/listings?${query}`);
       setResults(data);
     } catch (e) {
       setError((e as Error).message);
@@ -79,7 +120,19 @@ export default function CataloguePage() {
     }
   }, [filters]);
 
-  useEffect(() => { search(); }, [search]);
+  useEffect(() => {
+    if (!ready) return;
+    const query = filtersToQuery(filters);
+    if (query !== window.location.search.replace(/^\?/, '')) {
+      router.replace(query ? `/catalogue?${query}` : '/catalogue', { scroll: false });
+    }
+    search();
+  }, [ready, filters, search, router]);
+
+  const setSize = (q: string) => {
+    setSizeInput(q);
+    setFilters(f => ({ ...f, q: q.trim(), page: 1 }));
+  };
 
   const setF = (field: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const value = e.target.value;
@@ -125,9 +178,9 @@ export default function CataloguePage() {
             <label>Brand</label>
             <input className="form-control" value={filters.brand} onChange={setF('brand')} placeholder="Any brand" />
           </div>
-          <div className="form-group">
+          <div className="form-group filters-size">
             <label>Size</label>
-            <input className="form-control" value={filters.size_raw} onChange={setF('size_raw')} placeholder="e.g. 315/80R22.5" />
+            <SizeSearchBox value={sizeInput} onChange={setSizeInput} onCommit={setSize} />
           </div>
           <div className="form-group">
             <label>Country</label>
@@ -143,14 +196,43 @@ export default function CataloguePage() {
             <label>Min qty</label>
             <input className="form-control" type="number" min={1} value={filters.qty_min} onChange={setF('qty_min')} style={{ width: 80 }} />
           </div>
-          <button className="btn btn-primary" onClick={search}>Search</button>
+          <div className="form-group">
+            <label>Ply (PR)</label>
+            <input className="form-control" type="number" min={1} max={60} value={filters.ply_rating} onChange={setF('ply_rating')} style={{ width: 70 }} />
+          </div>
+          <div className="form-group">
+            <label>Load index from</label>
+            <input className="form-control" type="number" min={1} max={300} value={filters.load_index_min} onChange={setF('load_index_min')} style={{ width: 80 }} />
+          </div>
+          <button
+            className="btn btn-primary"
+            onClick={() => (sizeInput.trim() !== filters.q ? setSize(sizeInput) : search())}
+          >
+            Search
+          </button>
         </div>
 
         {error && <div className="alert alert-error">{error}</div>}
-        {loading && <div className="loading">Loading listings…</div>}
+        {loading && <div className="loading" role="status">Loading listings…</div>}
 
         {!loading && results.data.length === 0 && (
-          <div className="empty"><h3>No listings found</h3><p>Try adjusting your filters</p></div>
+          <div className="empty">
+            <h3>No listings found{filters.q ? ` for ${filters.q}` : ''}</h3>
+            {results.nearest && results.nearest.length > 0 ? (
+              <div className="nearest-sizes">
+                <p>Nearest sizes on offer:</p>
+                <div className="nearest-sizes-list">
+                  {results.nearest.map(s => (
+                    <button key={s.size} type="button" className="btn btn-secondary nearest-size" onClick={() => setSize(s.size)}>
+                      {s.size} <small>· {s.count}</small>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p>Try adjusting your filters</p>
+            )}
+          </div>
         )}
 
         {!loading && results.data.length > 0 && (
@@ -175,6 +257,17 @@ export default function CataloguePage() {
                       {/* Tire */}
                       <td style={{ minWidth: 200 }}>
                         <div style={{ fontWeight: 700, fontSize: '.95rem' }}>{l.size_raw}</div>
+                        {l.additional_sizes && l.additional_sizes.length > 0 && (
+                          <div className="also-sizes">
+                            also:{' '}
+                            {l.additional_sizes.map((s, i) => (
+                              <span key={s} className={s === l.matched_size ? 'also-size-matched' : undefined}
+                                title={s === l.matched_size ? 'Matches your search' : undefined}>
+                                {i > 0 ? ', ' : ''}{s}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         <div style={{ color: '#374151', fontSize: '.85rem' }}>
                           {l.brand}{l.pattern ? <span style={{ color: '#9ca3af' }}> · {l.pattern}</span> : ''}
                         </div>
@@ -202,6 +295,7 @@ export default function CataloguePage() {
                         {l.load_index && <div><b style={{ color: '#374151' }}>LI:</b> {l.load_index}</div>}
                         {l.dot_code    && <div><b style={{ color: '#374151' }}>Year:</b> {l.dot_code}</div>}
                         {l.origin_country && <div><b style={{ color: '#374151' }}>Origin:</b> {countryByCode[l.origin_country] ?? l.origin_country}</div>}
+                        {l.comment && <div className="catalogue-comment" title={l.comment}>{l.comment}</div>}
                       </td>
 
                       {/* Qty */}

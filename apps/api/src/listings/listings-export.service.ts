@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import { Listing } from './entities/listing.entity';
 import { Company } from '../companies/entities/company.entity';
+import { additionalSizesOf } from './listing-sizes';
 
 const COLS = [
   { key: 'sku',            header: 'SKU',              width: 18 },
@@ -11,6 +12,7 @@ const COLS = [
   { key: 'tire_type',      header: 'Type',              width: 14 },
   { key: 'brand',          header: 'Brand',             width: 16 },
   { key: 'size_raw',       header: 'Size',              width: 14 },
+  { key: 'alt_size',       header: 'Alt size',          width: 18 },
   { key: 'pattern',        header: 'Pattern',           width: 16 },
   { key: 'load_index',     header: 'Load Index',        width: 14 },
   { key: 'origin_country', header: 'Origin Country',   width: 16 },
@@ -41,6 +43,7 @@ export class ListingsExportService {
   async exportForUser(companyId: string): Promise<Buffer> {
     const listings = await this.listingRepo.find({
       where: { company_id: companyId },
+      relations: ['sizes'],
       order: { created_at: 'DESC' },
     });
     return this.buildWorkbook(listings, COLS, false);
@@ -48,7 +51,7 @@ export class ListingsExportService {
 
   async exportAll(): Promise<Buffer> {
     const listings = await this.listingRepo.find({
-      relations: ['company'],
+      relations: ['company', 'sizes'],
       order: { created_at: 'DESC' },
     });
     return this.buildWorkbook(listings, ADMIN_COLS, true);
@@ -85,6 +88,7 @@ export class ListingsExportService {
         tire_type: 'steer',
         brand: 'Michelin',
         size_raw: '315/80R22.5',
+        alt_size: '',
         pattern: 'X Multi D',
         load_index: '173D/178A8',
         origin_country: 'FR',
@@ -109,6 +113,8 @@ export class ListingsExportService {
         tire_type: l.tire_type ?? '',
         brand: l.brand,
         size_raw: l.size_raw,
+        // Additional sizes, "; "-separated (sizes may contain commas, e.g. 22,5)
+        alt_size: additionalSizesOf(l.sizes).join('; '),
         pattern: l.pattern ?? '',
         load_index: l.load_index ?? '',
         origin_country: l.origin_country ?? '',

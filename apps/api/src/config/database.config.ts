@@ -4,15 +4,18 @@ import { User } from '../auth/entities/user.entity';
 import { PasswordResetToken } from '../auth/entities/password-reset-token.entity';
 import { Company } from '../companies/entities/company.entity';
 import { Listing } from '../listings/entities/listing.entity';
+import { ListingSize } from '../listings/entities/listing-size.entity';
 import { Request } from '../requests/entities/request.entity';
 import { Offer } from '../offers/entities/offer.entity';
 import { Deal } from '../deals/entities/deal.entity';
 import { Message } from '../messages/entities/message.entity';
 import { Rating } from '../ratings/entities/rating.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
+import { ImportBatch, ImportBatchItem, ImportMapping } from '../listings/import/import.entities';
 
 export const ALL_ENTITIES = [
-  User, Company, Listing, Request, Offer, Deal, Message, Rating, AuditLog, PasswordResetToken,
+  User, Company, Listing, ListingSize, Request, Offer, Deal, Message, Rating, AuditLog, PasswordResetToken,
+  ImportBatch, ImportBatchItem, ImportMapping,
 ];
 
 // Prefer DATABASE_URL (used by .env.staging) when present; otherwise fall back
