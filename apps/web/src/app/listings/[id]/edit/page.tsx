@@ -3,7 +3,9 @@ import { useState, useEffect, FormEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Navbar from '../../../../components/Navbar';
 import TireSizeInput from '../../../../components/TireSizeInput';
+import AdditionalSizesInput from '../../../../components/AdditionalSizesInput';
 import CountrySelect from '../../../../components/CountrySelect';
+import { withRimConfirm } from '../../../../lib/rim-confirm';
 import { api } from '../../../../lib/api';
 
 const SEGMENTS = ['TBR', 'PCR', 'OTR', 'AGRI', 'MH'];
@@ -30,7 +32,7 @@ const TIRE_TYPES: Record<string, { label: string; value: string }[]> = {
 
 interface ListingData {
   id: string; segment: string; tire_type: string | null; brand: string;
-  size_raw: string; pattern: string | null; sku: string | null;
+  size_raw: string; additional_sizes?: string[]; pattern: string | null; sku: string | null;
   load_index: string | null; origin_country: string | null; dot_code: string | null;
   qty: number; condition: string; location_country: string; location_region: string | null;
   exclude_own_region: boolean; allowed_roles: string;
@@ -48,6 +50,7 @@ export default function EditListingPage() {
     sku: '', load_index: '', origin_country: '', production_year: '',
     qty: '', condition: 'new', location_country: '', location_region: '',
     price: '', currency: 'EUR', exclude_own_region: false,
+    additional_sizes: [] as string[],
   });
 
   useEffect(() => {
@@ -70,6 +73,7 @@ export default function EditListingPage() {
           price: l.price != null ? String(l.price) : '',
           currency: l.currency ?? 'EUR',
           exclude_own_region: l.exclude_own_region,
+          additional_sizes: l.additional_sizes ?? [],
         });
       })
       .catch(() => setError('Listing not found'))
@@ -89,11 +93,13 @@ export default function EditListingPage() {
     e.preventDefault();
     setSaving(true); setError('');
     try {
-      await api.patch(`/listings/${id}`, {
+      const saved = await withRimConfirm((confirm_rim_mismatch) => api.patch(`/listings/${id}`, {
         segment: form.segment,
         tire_type: form.tire_type || undefined,
         brand: form.brand,
         size: form.size || undefined,
+        // Always sent: removing the last additional size must clear it
+        additional_sizes: form.additional_sizes.filter(s => s.trim()),
         pattern: form.pattern || undefined,
         sku: form.sku || undefined,
         price: form.price ? parseFloat(form.price) : undefined,
@@ -106,8 +112,9 @@ export default function EditListingPage() {
         location_country: form.location_country.toUpperCase(),
         location_region: form.location_region || undefined,
         exclude_own_region: form.exclude_own_region,
-      });
-      router.push('/listings');
+        confirm_rim_mismatch,
+      }));
+      if (saved !== null) router.push('/listings');
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -154,6 +161,14 @@ export default function EditListingPage() {
               <div className="form-group">
                 <label>Tire size</label>
                 <TireSizeInput value={form.size} onChange={v => setForm(f => ({ ...f, size: v }))} />
+              </div>
+
+              <div className="form-group">
+                <label>Additional sizes</label>
+                <AdditionalSizesInput
+                  value={form.additional_sizes}
+                  onChange={v => setForm(f => ({ ...f, additional_sizes: v }))}
+                />
               </div>
 
               <div className="form-group">

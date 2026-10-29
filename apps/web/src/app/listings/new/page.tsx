@@ -3,7 +3,9 @@ import { useState, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Navbar from '../../../components/Navbar';
 import TireSizeInput from '../../../components/TireSizeInput';
+import AdditionalSizesInput from '../../../components/AdditionalSizesInput';
 import CountrySelect from '../../../components/CountrySelect';
+import { withRimConfirm } from '../../../lib/rim-confirm';
 import { api } from '../../../lib/api';
 
 const SEGMENTS = ['TBR', 'PCR', 'OTR', 'AGRI', 'MH'];
@@ -35,6 +37,7 @@ export default function NewListingPage() {
     qty: '', production_year: '', load_index: '', origin_country: '',
     location_country: '', location_region: '', price: '', currency: 'EUR',
     condition: 'new', exclude_own_region: false,
+    additional_sizes: [] as string[],
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -55,10 +58,11 @@ export default function NewListingPage() {
     if (!form.size.trim()) { setError('Size is required'); return; }
     setLoading(true);
     try {
-      await api.post('/listings', {
+      const saved = await withRimConfirm((confirm_rim_mismatch) => api.post('/listings', {
         segment: form.segment,
         brand: form.brand,
         size: form.size,
+        additional_sizes: form.additional_sizes.filter(s => s.trim()),
         qty: parseInt(form.qty, 10),
         condition: form.condition,
         location_country: form.location_country.toUpperCase(),
@@ -72,8 +76,9 @@ export default function NewListingPage() {
         dot_code: form.production_year || undefined,
         location_region: form.location_region || undefined,
         exclude_own_region: form.exclude_own_region,
-      });
-      router.push('/listings');
+        confirm_rim_mismatch,
+      }));
+      if (saved !== null) router.push('/listings');
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -129,6 +134,15 @@ export default function NewListingPage() {
                   value={form.size}
                   onChange={v => setForm(f => ({ ...f, size: v }))}
                 />
+              </div>
+
+              <div className="form-group">
+                <label>Additional sizes</label>
+                <AdditionalSizesInput
+                  value={form.additional_sizes}
+                  onChange={v => setForm(f => ({ ...f, additional_sizes: v }))}
+                />
+                <p className="form-hint">Other markings of the same tyre, e.g. 440/80-28 for a 16.9-28. Buyers find the listing by any of them.</p>
               </div>
 
               <div className="form-group">

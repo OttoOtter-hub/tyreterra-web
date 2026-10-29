@@ -13,8 +13,10 @@ import {
   Length,
   Matches,
   ArrayMinSize,
+  ArrayMaxSize,
 } from 'class-validator';
 import { TireSegment, TireCondition, AllowedRoles } from '../entities/listing.entity';
+import { MAX_ADDITIONAL_SIZES } from '../listing-sizes';
 
 export class CreateListingDto {
   @IsEnum(TireSegment)
@@ -30,6 +32,14 @@ export class CreateListingDto {
   @MinLength(3)
   @MaxLength(30)
   size: string;
+
+  // Further sizes of the same tyre, e.g. "440/80-28" for a "16.9-28"; parsed like `size`
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(MAX_ADDITIONAL_SIZES)
+  @IsString({ each: true })
+  @MaxLength(30, { each: true })
+  additional_sizes?: string[];
 
   @IsOptional()
   @IsString()
@@ -107,4 +117,9 @@ export class CreateListingDto {
   @IsOptional()
   @IsEnum(AllowedRoles)
   allowed_roles?: AllowedRoles;
+
+  // The sizes sit on different rims and the seller confirmed that this is right
+  @IsOptional()
+  @IsBoolean()
+  confirm_rim_mismatch?: boolean;
 }

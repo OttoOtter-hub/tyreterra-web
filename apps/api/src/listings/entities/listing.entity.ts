@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { Company } from '../../companies/entities/company.entity';
 import { Request } from '../../requests/entities/request.entity';
+import { ListingSize } from './listing-size.entity';
 
 export enum TireSegment {
   TBR = 'TBR',
@@ -130,6 +131,10 @@ export class Listing {
 
   @OneToMany(() => Request, (request) => request.listing)
   requests: Request[];
+
+  // All sizes, position 0 = the main size above (listing_sizes)
+  @OneToMany(() => ListingSize, (size) => size.listing)
+  sizes: ListingSize[];
 
   @Column({ type: 'timestamptz', nullable: true, name: 'deleted_at' })
   deleted_at: Date | null;

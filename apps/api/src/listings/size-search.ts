@@ -1,5 +1,6 @@
-import { Brackets, WhereExpressionBuilder } from 'typeorm';
+import { Brackets, ObjectLiteral, SelectQueryBuilder, WhereExpressionBuilder } from 'typeorm';
 import { SizeCandidate, PartialSize } from '@tyreterra/tire-size';
+import { ListingSize } from './entities/listing-size.entity';
 
 // Readings below this share of confidence are shown to the user as
 // alternatives but not used to filter.
@@ -59,4 +60,19 @@ export function toSuggestion(row: Record<string, unknown>): SizeSuggestion {
     rim: Number(row.rim),
     count: Number(row.count),
   };
+}
+
+/** Adds size conditions for a size table alias (e.g. `ls`) */
+export type SizeMatcher = (qb: WhereExpressionBuilder, sizeAlias: string) => void;
+
+export function candidateMatcher(candidates: SizeCandidate[]): SizeMatcher {
+  return (qb, sizeAlias) => whereAnyCandidate(qb, sizeAlias, candidates);
+}
+
+// Keeps listings that have at least one size (main or additional) matching,
+// as EXISTS, so a listing with two matching sizes still appears once.
+export function whereHasSize<T extends ObjectLiteral>(qb: SelectQueryBuilder<T>, alias: string, match: SizeMatcher): void {
+  const sub = qb.subQuery().select('1').from(ListingSize, 'lsx').where(`lsx.listing_id = ${alias}.id`);
+  match(sub, 'lsx');
+  qb.andWhere(`EXISTS ${sub.getQuery()}`, sub.getParameters());
 }

@@ -1,5 +1,6 @@
 export { parseTireSize, TireSizeParseError } from './strict';
 export type { ParsedTireSize, TireSizeFormat } from './strict';
+export { implausibleSize } from './plausible';
 export { parsePartialSize, normaliseSizeQuery } from './partial';
 export type { PartialSize, SizeCandidate, PartialFormat, Construction } from './partial';
 

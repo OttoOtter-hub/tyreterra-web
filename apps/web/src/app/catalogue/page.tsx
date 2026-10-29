@@ -35,6 +35,9 @@ interface CatalogueRow extends TireListing {
   id: string;
   company_id: string;
   size_raw: string;
+  additional_sizes?: string[];
+  /** Which of the listing's sizes matched a size search */
+  matched_size?: string | null;
   brand: string;
   segment: string;
   qty: number;
@@ -245,6 +248,17 @@ export default function CataloguePage() {
                       {/* Tire */}
                       <td style={{ minWidth: 200 }}>
                         <div style={{ fontWeight: 700, fontSize: '.95rem' }}>{l.size_raw}</div>
+                        {l.additional_sizes && l.additional_sizes.length > 0 && (
+                          <div className="also-sizes">
+                            also:{' '}
+                            {l.additional_sizes.map((s, i) => (
+                              <span key={s} className={s === l.matched_size ? 'also-size-matched' : undefined}
+                                title={s === l.matched_size ? 'Matches your search' : undefined}>
+                                {i > 0 ? ', ' : ''}{s}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         <div style={{ color: '#374151', fontSize: '.85rem' }}>
                           {l.brand}{l.pattern ? <span style={{ color: '#9ca3af' }}> · {l.pattern}</span> : ''}
                         </div>

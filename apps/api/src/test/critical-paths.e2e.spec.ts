@@ -14,12 +14,14 @@ import { JwtService } from '@nestjs/jwt';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import * as request from 'supertest';
+import * as ExcelJS from 'exceljs';
 import { randomUUID } from 'crypto';
 import * as bcrypt from 'bcryptjs';
 import { AppModule } from '../app.module';
 import { User, UserRole, UserStatus } from '../auth/entities/user.entity';
 import { Company } from '../companies/entities/company.entity';
 import { Listing } from '../listings/entities/listing.entity';
+import { ListingSize } from '../listings/entities/listing-size.entity';
 import { EncryptionService } from '../common/encryption.service';
 import { SECRET_FIELDS } from '../common/serializers';
 
@@ -39,6 +41,7 @@ describe('Critical paths (e2e)', () => {
   let userRepo: Repository<User>;
   let companyRepo: Repository<Company>;
   let listingRepo: Repository<Listing>;
+  let sizeRepo: Repository<ListingSize>;
   let encryption: EncryptionService;
 
   const createdUserIds: string[] = [];
@@ -65,6 +68,7 @@ describe('Critical paths (e2e)', () => {
     userRepo = moduleRef.get(getRepositoryToken(User));
     companyRepo = moduleRef.get(getRepositoryToken(Company));
     listingRepo = moduleRef.get(getRepositoryToken(Listing));
+    sizeRepo = moduleRef.get(getRepositoryToken(ListingSize));
     encryption = moduleRef.get(EncryptionService);
   });
 
@@ -659,7 +663,145 @@ describe('Critical paths (e2e)', () => {
     });
   });
 
-  // ── 8. Rate limiting ──────────────────────────────────────────────────────
+  // ── 8. Several sizes per listing ──────────────────────────────────────────
+  describe('Several sizes per listing', () => {
+    const agri = { ...baseListing, segment: 'AGRI', brand: `MultiSize-${randomUUID().slice(0, 8)}` };
+
+    async function create(token: string, extra: Record<string, unknown>) {
+      const res = await request(httpServer)
+        .post('/api/listings')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...agri, ...extra })
+        .expect(201);
+      createdListingIds.push(res.body.id);
+      return res.body as { id: string; size_raw: string; additional_sizes: string[] };
+    }
+
+    const rowsOf = async (listingId: string) =>
+      (await sizeRepo.find({ where: { listing_id: listingId }, order: { position: 'ASC' } }))
+        .map((s) => [s.position, s.size_raw]);
+
+    function search(token: string, query: Record<string, string>) {
+      return request(httpServer)
+        .get('/api/listings')
+        .query({ ...query, brand: agri.brand })
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+    }
+
+    it('writes every size to listing_sizes on create, main size first, and returns them', async () => {
+      const seller = await makeActiveUser();
+      const l = await create(seller.token, { size: '16.9-28', additional_sizes: ['440/80-28', ' ', '16.9-28'] });
+
+      expect(l.size_raw).toBe('16.9-28');
+      expect(l.additional_sizes).toEqual(['440/80-28']); // blank and repeated main size dropped
+      expect(await rowsOf(l.id)).toEqual([[0, '16.9-28'], [1, '440/80-28']]);
+
+      const one = await request(httpServer)
+        .get(`/api/listings/${l.id}`)
+        .set('Authorization', `Bearer ${seller.token}`)
+        .expect(200);
+      expect(one.body.additional_sizes).toEqual(['440/80-28']);
+      expect(one.body.sizes).toBeUndefined();
+    });
+
+    it('finds a listing by its additional size, once, and says which size matched', async () => {
+      const seller = await makeActiveUser();
+      const buyer = await makeActiveUser({ country: 'PL' });
+      // Both sizes read as 440/80 28 — a query without construction matches both
+      const l = await create(seller.token, { size: '440/80R28', additional_sizes: ['440/80-28', '16.9R28'] });
+
+      const byAlt = await search(buyer.token, { q: '16.9R28' });
+      expect(byAlt.body.data.map((r: { id: string }) => r.id)).toEqual([l.id]);
+      expect(byAlt.body.data[0].matched_size).toBe('16.9R28');
+      expect(byAlt.body.data[0].additional_sizes).toEqual(['440/80-28', '16.9R28']);
+
+      // Two of its sizes match; it still appears once (other listings of this
+      // brand from earlier tests may match too, each once as well)
+      const both = await search(buyer.token, { q: '440 80 28' });
+      const ids: string[] = both.body.data.map((r: { id: string }) => r.id);
+      expect(ids.filter((id) => id === l.id)).toHaveLength(1);
+      expect(new Set(ids).size).toBe(ids.length);
+      expect(both.body.total).toBe(ids.length);
+      const hit = both.body.data.find((r: { id: string }) => r.id === l.id);
+      expect(hit.matched_size).toBe('440/80R28'); // lowest position wins
+
+      const legacy = await search(buyer.token, { size_raw: '440/80-28' });
+      expect(legacy.body.data.find((r: { id: string }) => r.id === l.id)?.matched_size).toBe('440/80-28');
+
+      const sug = await request(httpServer)
+        .get('/api/listings/size-suggest')
+        .query({ q: '16.9R2' })
+        .set('Authorization', `Bearer ${buyer.token}`)
+        .expect(200);
+      expect(sug.body.find((s: { size: string }) => s.size === '16.9R28')?.count).toBeGreaterThanOrEqual(1);
+    });
+
+    it('keeps listing_sizes in step on update, and rejects a bad size without changing anything', async () => {
+      const seller = await makeActiveUser();
+      const l = await create(seller.token, { size: '18.4-30', additional_sizes: ['480/80-30'] });
+      const patch = (body: Record<string, unknown>, status = 200) =>
+        request(httpServer)
+          .patch(`/api/listings/${l.id}`)
+          .set('Authorization', `Bearer ${seller.token}`)
+          .send(body)
+          .expect(status);
+
+      await patch({ size: '18.4R30' }); // main size only: extras kept
+      expect(await rowsOf(l.id)).toEqual([[0, '18.4R30'], [1, '480/80-30']]);
+      expect((await listingRepo.findOneByOrFail({ id: l.id })).size_raw).toBe('18.4R30');
+
+      await patch({ additional_sizes: ['480/80R30', '18.4-30'] });
+      expect(await rowsOf(l.id)).toEqual([[0, '18.4R30'], [1, '480/80R30'], [2, '18.4-30']]);
+
+      await patch({ additional_sizes: ['not a size'], qty: 99 }, 400);
+      expect(await rowsOf(l.id)).toEqual([[0, '18.4R30'], [1, '480/80R30'], [2, '18.4-30']]);
+      expect((await listingRepo.findOneByOrFail({ id: l.id })).qty).toBe(baseListing.qty);
+
+      // four valid sizes: over the limit of three
+      await patch({ additional_sizes: ['480/80R30', '18.4-30', '480/80-30', '18.4R28'] }, 400);
+
+      await patch({ additional_sizes: [] });
+      expect(await rowsOf(l.id)).toEqual([[0, '18.4R30']]);
+    });
+
+    it('legacy template import reads "Alt size" and writes listing_sizes', async () => {
+      const seller = await makeActiveUser();
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Listings');
+      ws.addRow(['Segment', 'Brand', 'Size', 'Alt size', 'Qty', 'Condition', 'Location']);
+      ws.addRow(['AGRI', agri.brand, '20.8-38', '520/85-38; 20.8R38', 4, 'new', 'DE']);
+      const buf = Buffer.from(await wb.xlsx.writeBuffer());
+
+      const res = await request(httpServer)
+        .post('/api/listings/import')
+        .set('Authorization', `Bearer ${seller.token}`)
+        .attach('file', buf, 'listings.xlsx')
+        .expect(201);
+      expect(res.body.imported).toBe(1);
+
+      const created = await listingRepo.findOneByOrFail({ company_id: seller.company.id });
+      createdListingIds.push(created.id);
+      expect(await rowsOf(created.id)).toEqual([[0, '20.8-38'], [1, '520/85-38'], [2, '20.8R38']]);
+    });
+
+    it('deleting a listing row removes its sizes (ON DELETE CASCADE)', async () => {
+      const seller = await makeActiveUser();
+      const l = await create(seller.token, { size: '12.4-24', additional_sizes: ['320/85-24'] });
+      await listingRepo.delete(l.id);
+      expect(await sizeRepo.countBy({ listing_id: l.id })).toBe(0);
+    });
+
+    it('asks to confirm sizes on different rims (409), saves once confirmed', async () => {
+      const seller = await makeActiveUser();
+      const form = { ...agri, size: '16.9-28', additional_sizes: ['440/80-30'] };
+      await request(httpServer).post('/api/listings').set('Authorization', `Bearer ${seller.token}`).send(form).expect(409);
+      const l = await create(seller.token, { size: form.size, additional_sizes: form.additional_sizes, confirm_rim_mismatch: true });
+      expect(await rowsOf(l.id)).toEqual([[0, '16.9-28'], [1, '440/80-30']]);
+    });
+  });
+
+  // ── 9. Rate limiting ──────────────────────────────────────────────────────
   // Runs last and in isolation: every prior test in this file authenticates
   // via signed JWTs (see makeActiveUser), never via POST /auth/login, so
   // nothing here has already spent part of the per-IP login quota.

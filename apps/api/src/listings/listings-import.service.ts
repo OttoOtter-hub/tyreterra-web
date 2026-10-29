@@ -4,7 +4,9 @@ import { Repository } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import { Listing, ListingStatus, TireSegment, TireCondition, AllowedRoles } from './entities/listing.entity';
 import { User } from '../auth/entities/user.entity';
-import { parseTireSize, TireSizeParseError } from '@tyreterra/tire-size';
+import { ParsedTireSize } from '@tyreterra/tire-size';
+import { mainSizeColumns, parseListingSizes, sizeRows } from './listing-sizes';
+import { ListingSize } from './entities/listing-size.entity';
 
 const VALID_SEGMENTS = Object.values(TireSegment) as string[];
 const VALID_CONDITIONS = Object.values(TireCondition) as string[];
@@ -47,7 +49,7 @@ export class ListingsImportService {
       cell?.value == null ? '' : String(cell.value).trim();
 
     const errors: { row: number; message: string }[] = [];
-    const toCreate: Partial<Listing>[] = [];
+    const toCreate: { listing: Partial<Listing>; sizes: ParsedTireSize[] }[] = [];
 
     const expires_at = new Date();
     expires_at.setDate(expires_at.getDate() + 30);
@@ -93,27 +95,23 @@ export class ListingsImportService {
         throw new BadRequestException(JSON.stringify(errors));
       }
 
-      let parsed;
+      // "Alt size" (as exported): further sizes separated by ";"
+      let sizes: ParsedTireSize[];
       try {
-        parsed = parseTireSize(size);
+        sizes = parseListingSizes(size, getStr(row, col('alt_size')).split(';'));
       } catch (e) {
-        const msg = e instanceof TireSizeParseError ? e.message : 'Invalid size format';
+        const msg = e instanceof BadRequestException ? e.message : 'Invalid size format';
         errors.push({ row: rowNum, message: msg });
         throw new BadRequestException(JSON.stringify(errors));
       }
 
-      toCreate.push({
+      toCreate.push({ sizes, listing: {
         company_id: user.company_id!,
         segment: segment as TireSegment,
         tire_type: getStr(row, col('type')) || null,
         brand,
         sku: getStr(row, col('sku')) || null,
-        size_format: parsed.format,
-        size_width: parsed.size_width,
-        size_aspect_ratio: parsed.size_aspect_ratio,
-        size_construction: parsed.size_construction,
-        size_rim: parsed.size_rim,
-        size_raw: parsed.size_raw,
+        ...mainSizeColumns(sizes[0]),
         pattern: getStr(row, col('pattern')) || null,
         load_index: getStr(row, col('load_index')) || null,
         origin_country: getStr(row, col('origin_country')) || null,
@@ -126,12 +124,16 @@ export class ListingsImportService {
         allowed_roles: AllowedRoles.ALL,
         exclude_own_region: false,
         expires_at,
-      });
+      } });
     });
 
     if (dataRowCount === 0) throw new BadRequestException('No data rows found');
 
-    const saved = await this.listingRepo.save(toCreate.map(d => this.listingRepo.create(d)));
-    return { imported: saved.length, skipped: 0, errors: [] };
+    // All rows with their sizes, or nothing
+    await this.listingRepo.manager.transaction(async (m) => {
+      const saved = await m.save(toCreate.map((d) => this.listingRepo.create(d.listing)));
+      await m.insert(ListingSize, saved.flatMap((l, i) => sizeRows(l.id, toCreate[i].sizes)));
+    });
+    return { imported: toCreate.length, skipped: 0, errors: [] };
   }
 }

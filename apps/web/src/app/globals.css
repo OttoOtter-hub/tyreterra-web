@@ -161,3 +161,10 @@ button.size-alt:hover { border-color: var(--color-primary); color: var(--color-p
 
 /* ── Loading ─────────────────────────────── */
 .loading { text-align: center; padding: 2rem; color: var(--color-muted); }
+
+/* Additional sizes of a listing */
+.also-sizes { font-size: .78rem; color: var(--color-muted); }
+.also-size-matched { color: var(--color-text); font-weight: 600; background: #fef3c7; border-radius: 3px; padding: 0 .2rem; }
+.additional-sizes { display: flex; flex-direction: column; gap: .5rem; align-items: flex-start; }
+.additional-size-row { display: flex; gap: .5rem; align-items: flex-start; width: 100%; }
+.additional-size-input { flex: 1; }
