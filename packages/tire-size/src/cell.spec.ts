@@ -1,8 +1,6 @@
 import { parseCondition, parseGluedCell, parsePrice, parseQty, parseTireType, parseYear, resolveSize, Segment } from './cell';
 import { BRANDS, findBrand, fuzzyBrand, knownBrand } from './brands';
 import { COUNTRIES, COUNTRY_NAMES, countryCode } from './countries';
-import { implausibleSize } from './plausible';
-import { parseTireSize } from './strict';
 
 interface Expect {
   sizes: string[];
@@ -108,12 +106,6 @@ describe('resolveSize', () => {
   it('rejects numbers no tyre has', () => {
     expect(resolveSize('999/99R99')).toBeNull();
   });
-});
-
-describe('implausibleSize', () => {
-  it.each(['315/80R22.5', '59/80R63', '440/80-28', '3.00-4', '710/70R42', '12.5/80-18'])('%s is a real size', (s) =>
-    expect(implausibleSize(parseTireSize(s))).toBeNull());
-  it.each(['999/99R99', '315/80R2', '80/10R22.5'])('%s is not', (s) => expect(implausibleSize(parseTireSize(s))).not.toBeNull());
 });
 
 describe('single fields', () => {

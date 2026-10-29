@@ -805,6 +805,17 @@ describe('Critical paths (e2e)', () => {
       const l = await create(seller.token, { size: form.size, additional_sizes: form.additional_sizes, confirm_rim_mismatch: true });
       expect(await rowsOf(l.id)).toEqual([[0, '16.9-28'], [1, '440/80-30']]);
     });
+
+    it('accepts the largest real sizes and refuses impossible ones', async () => {
+      const seller = await makeActiveUser();
+      const l = await create(seller.token, { segment: 'OTR', size: '80/80R57', additional_sizes: ['46/90R57'] });
+      expect(await rowsOf(l.id)).toEqual([[0, '80/80R57'], [1, '46/90R57']]);
+      await create(seller.token, { segment: 'OTR', size: '1800R25' });
+      for (const size of ['999/99R99', '0/0R0', '5/5R5']) {
+        await request(httpServer).post('/api/listings').set('Authorization', `Bearer ${seller.token}`)
+          .send({ ...agri, size }).expect(400);
+      }
+    });
   });
 
   // ── 9. Load index and comment ─────────────────────────────────────────────
