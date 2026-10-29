@@ -211,7 +211,7 @@ The strict parser checks spelling only; `implausibleSize` (`src/plausible.ts`) r
 
 **Glued cells** (`parseGluedCell`, `src/cell.ts`) — reads everything out of one cell: all sizes (incl. ones in brackets, glued digits, comma decimals, LT/ZR), qty (`14pcs`, `x14`, `14 шт`, `qty 14`), year/DOT, load index and ply, condition, tyre type of the segment, country ("made in …", names in 6 languages), brand (fixed directory `src/brands.ts`, aliases incl. Cyrillic, typo-tolerant), pattern (text next to the brand). Whatever is left is returned as `unrecognized` — never dropped. Field parsers: `parseQty`, `parseYear`, `parseCondition`, `parsePrice` (comma decimals, €/$/EUR/USD, ambiguous `1,234` flagged), `parseTireType`.
 
-Not supported yet: "x" sizes (`28x9-15`, `18x7-8`, `31x10.50R15`) — reported as an unsupported size in the import, never guessed.
+"x" sizes are searched by their outer diameter too: `9-15` does not find `28x9-15`. They are not linked to conventional sizes (`28x9-15` and `9.00-15` stay separate); an equivalence table is left for later.
 
 ---
 
@@ -366,7 +366,7 @@ The e2e suite needs a real **disposable** database (e.g. the local `docker-compo
 - `dealer`/`distributor`: users still carry the role; listings can be limited by `allowed_roles` (enforced), but no UI sets it.
 - `visible_regions` is enforced but no UI sets it yet.
 - Brand directory is a fixed list in `packages/tire-size/src/brands.ts`; unknown brands are imported as `Other` (original text offered for pattern/comment). Extending it is a code change.
-- "x" sizes (`28x9-15`, `18x7-8`, `31x10.50R15`) are not supported by the size parser yet.
+- No equivalence table between "x" sizes and conventional ones (`28x9-15` / `9.00-15`): a search for one does not find the other.
 - `npm audit` (2026-10-29, after the dependency update): no critical. What remains needs Nest 11/12 (`@nestjs/core`, moderate), sits in Nest CLI build tooling, or is in code paths not used (`file-type` in `@nestjs/common`, `uuid` in exceljs). The import reads files with exceljs 4.4.0; the abandoned npm `xlsx` 0.18.5 was not used (prototype pollution CVE-2023-30533, ReDoS CVE-2024-22363; fixes only on the SheetJS CDN).
 - Single admin account (created with `seed-admin.ts`), no admin invite flow.
 - Planned future work: Distributor Orders module and role reintroduction — see `docs/future/`.
