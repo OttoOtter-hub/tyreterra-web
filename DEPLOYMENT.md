@@ -137,7 +137,7 @@ Schema changes go **only through migrations**. `synchronize` is `false` everywhe
 cd /home/tyreterra && sudo -u tyreterra -H npm --prefix /opt/tyreterra/apps/api run migration:run
 ```
 
-The `migrations` table records what has been applied (8 migrations as of 2026-10-20). Before running against an existing database, check that table for pending entries.
+The `migrations` table records what has been applied (8 migrations as of 2026-10-20). The smart import branch adds 1750000000009 (listing_sizes, backfilled from listings), 1750000000010 (parsed load index columns + comment, backfilled by parsing `load_index`) and 1750000000011 (import tables); they run on a database with data, and down migrations drop exactly what they added. Before running against an existing database, check that table for pending entries.
 
 Creating a new migration (locally):
 

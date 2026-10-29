@@ -11,9 +11,11 @@ import { Deal } from '../deals/entities/deal.entity';
 import { Message } from '../messages/entities/message.entity';
 import { Rating } from '../ratings/entities/rating.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
+import { ImportBatch, ImportBatchItem, ImportMapping } from '../listings/import/import.entities';
 
 export const ALL_ENTITIES = [
   User, Company, Listing, ListingSize, Request, Offer, Deal, Message, Rating, AuditLog, PasswordResetToken,
+  ImportBatch, ImportBatchItem, ImportMapping,
 ];
 
 // Prefer DATABASE_URL (used by .env.staging) when present; otherwise fall back

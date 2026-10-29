@@ -131,7 +131,9 @@ export class ListingsService {
 
   private readonly suggestCache = new Map<string, { value: SizeSuggestion[]; expires: number }>();
 
-  // Column values of a new listing from validated input and its parsed sizes
+  // Column values of a new listing from validated input and its parsed sizes.
+  // Shared by the form (create) and the smart import, so both store a
+  // listing the same way.
   buildNewListing(dto: CreateListingDto, companyId: string, sizes: ParsedTireSize[]): Partial<Listing> {
     const expires_at = new Date();
     expires_at.setDate(expires_at.getDate() + LISTING_TTL_DAYS);

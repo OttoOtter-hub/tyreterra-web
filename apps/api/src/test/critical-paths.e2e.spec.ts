@@ -12,7 +12,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, IsNull, Repository } from 'typeorm';
 import * as request from 'supertest';
 import * as ExcelJS from 'exceljs';
 import { randomUUID } from 'crypto';
@@ -24,6 +24,9 @@ import { Listing } from '../listings/entities/listing.entity';
 import { ListingSize } from '../listings/entities/listing-size.entity';
 import { EncryptionService } from '../common/encryption.service';
 import { SECRET_FIELDS } from '../common/serializers';
+import { applyBodyLimits } from '../body-limits';
+import { ImportBatch } from '../listings/import/import.entities';
+import { deflateRawSync } from 'zlib';
 
 // Integration tests against a real, disposable database (e.g. the local
 // docker-compose Postgres), never staging or production. The schema is built
@@ -42,6 +45,7 @@ describe('Critical paths (e2e)', () => {
   let companyRepo: Repository<Company>;
   let listingRepo: Repository<Listing>;
   let sizeRepo: Repository<ListingSize>;
+  let batchRepo: Repository<ImportBatch>;
   let encryption: EncryptionService;
 
   const createdUserIds: string[] = [];
@@ -56,8 +60,9 @@ describe('Critical paths (e2e)', () => {
     // Same path as production: build the schema with migrations, not synchronize
     await moduleRef.get(DataSource).runMigrations();
 
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication({ bodyParser: false });
     app.setGlobalPrefix('api');
+    applyBodyLimits(app);
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
     );
@@ -69,6 +74,7 @@ describe('Critical paths (e2e)', () => {
     companyRepo = moduleRef.get(getRepositoryToken(Company));
     listingRepo = moduleRef.get(getRepositoryToken(Listing));
     sizeRepo = moduleRef.get(getRepositoryToken(ListingSize));
+    batchRepo = moduleRef.get(getRepositoryToken(ImportBatch));
     encryption = moduleRef.get(EncryptionService);
   });
 
@@ -843,7 +849,295 @@ describe('Critical paths (e2e)', () => {
     });
   });
 
-  // ── 10. Rate limiting ─────────────────────────────────────────────────────
+  // ── 10. Smart import ───────────────────────────────────────────────────────
+  describe('Smart import', () => {
+    const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+    async function xlsxOf(rows: unknown[][], tweak?: (ws: ExcelJS.Worksheet) => void): Promise<Buffer> {
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Stock');
+      for (const r of rows) ws.addRow(r);
+      tweak?.(ws);
+      return Buffer.from(await wb.xlsx.writeBuffer());
+    }
+
+    function analyze(token: string, file: Buffer, name = 'stock.xlsx', type = XLSX, segment = 'TBR') {
+      return request(httpServer)
+        .post('/api/listings/import/analyze')
+        .set('Authorization', `Bearer ${token}`)
+        .field('segment', segment)
+        .attach('file', file, { filename: name, contentType: type });
+    }
+
+    function preview(token: string, file: Buffer, options: Record<string, unknown>, name = 'stock.xlsx', type = XLSX) {
+      return request(httpServer)
+        .post('/api/listings/import/preview')
+        .set('Authorization', `Bearer ${token}`)
+        .field('options', JSON.stringify({ update_mode: 'update', defaults: { condition: 'new', location_country: 'DE' }, ...options }))
+        .attach('file', file, { filename: name, contentType: type });
+    }
+
+    function commit(token: string, body: Record<string, unknown>) {
+      return request(httpServer)
+        .post('/api/listings/import/commit')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ segment: 'TBR', update_mode: 'update', ...body });
+    }
+
+    const rowsForCommit = (rows: { row: number; data: unknown; unrecognized: string | null }[]) =>
+      rows.map(({ row, data, unrecognized }) => ({ row, data, unrecognized }));
+    const liveListings = (companyId: string) =>
+      listingRepo.find({ where: { company_id: companyId, deleted_at: IsNull() }, order: { size_raw: 'ASC' } });
+
+    // A price list as sellers send it: a title above the table, Russian
+    // headers, a size cell with the load index glued on, a row without a size
+    const stock = [
+      ['Остатки на складе, октябрь 2026'],
+      [],
+      ['Размер', 'Бренд', 'Модель', 'Кол-во', 'Год', 'Цена'],
+      ['315/80R22.5 156/150L', 'Michelin', 'X Multi D', 12, 2024, '250,50 €'],
+      ['385/65 R22,5 160K', 'Bridgestnoe', 'R168', 4, 2023, ''],
+      ['295/80R22.5 (13R22.5) 152/148M', 'Continental', 'HDR2', 2, '', ''],
+      ['see attachment', 'Continental', 'HSR', 5, '', ''],
+    ];
+
+    async function analyzedPreview(token: string, file: Buffer) {
+      const a = await analyze(token, file).expect(200);
+      const mapping = Object.fromEntries(a.body.columns.map((c: { index: number; type: string }) => [c.index, c.type]));
+      const p = await preview(token, file, { segment: 'TBR', sheet: a.body.sheet, header_row: a.body.header_row, mapping }).expect(200);
+      return { a, p };
+    }
+
+    it('reads a messy sheet, previews without writing, imports valid rows and skips the bad one', async () => {
+      const seller = await makeActiveUser();
+      const file = await xlsxOf(stock);
+      const { a, p } = await analyzedPreview(seller.token, file);
+
+      expect(a.body.header_row).toBe(3);
+      expect(a.body.columns.map((c: { type: string }) => c.type)).toEqual(['size', 'brand', 'pattern', 'qty', 'dot_year', 'price']);
+      expect(a.body.columns[0].glued).toBe(true);
+
+      const rows = p.body.rows;
+      expect(rows).toHaveLength(4);
+      expect(rows[0].data).toMatchObject({ size: '315/80R22.5', brand: 'Michelin', load_index: '156/150L', qty: 12, dot_code: '2024', price: 250.5, currency: 'EUR' });
+      expect(rows[1].data).toMatchObject({ size: '385/65R22.5', brand: 'Bridgestone', load_index: '160K' });
+      expect(rows[1].status).toBe('warning'); // brand typo corrected
+      expect(rows[2].data.additional_sizes).toEqual(['13R22.5']);
+      expect(rows[3].status).toBe('error');
+      expect(rows.slice(0, 3).map((r: { action: string }) => r.action)).toEqual(['new', 'new', 'new']);
+      expect(await liveListings(seller.company.id)).toHaveLength(0); // nothing written before commit
+
+      const c = await commit(seller.token, { rows: rowsForCommit(rows) }).expect(200);
+      expect(c.body.counts).toMatchObject({ created: 3, skipped: 1 });
+      expect(c.body.errors).toEqual([{ row: 7, messages: expect.any(Array) }]);
+      expect(c.body.errors_csv).toContain('see attachment');
+
+      const saved = await liveListings(seller.company.id);
+      expect(saved.map((l) => l.size_raw)).toEqual(['295/80R22.5', '315/80R22.5', '385/65R22.5']);
+      const michelin = saved.find((l) => l.brand === 'Michelin')!;
+      expect(michelin).toMatchObject({ load_index_single: 156, load_index_dual: 150, speed_single: 'L', segment: 'TBR' });
+      expect(encryption.decrypt(michelin.price_internal_encrypted!)).toBe('250.5');
+      const conti = saved.find((l) => l.brand === 'Continental')!;
+      expect((await sizeRepo.find({ where: { listing_id: conti.id }, order: { position: 'ASC' } })).map((s) => s.size_raw))
+        .toEqual(['295/80R22.5', '13R22.5']);
+    });
+
+    it('updates by key on re-upload instead of duplicating, and undo puts everything back', async () => {
+      const seller = await makeActiveUser();
+      const file = await xlsxOf(stock);
+      const first = await analyzedPreview(seller.token, file);
+      const created = await commit(seller.token, { rows: rowsForCommit(first.p.body.rows) }).expect(200);
+
+      // Same file again: everything unchanged, nothing new
+      const again = await analyzedPreview(seller.token, file);
+      expect(again.p.body.summary).toMatchObject({ new: 0, update: 0, unchanged: 3, errors: 1 });
+      const same = await commit(seller.token, { rows: rowsForCommit(again.p.body.rows) }).expect(200);
+      expect(same.body.counts).toMatchObject({ created: 0, updated: 0, unchanged: 3 });
+      expect(await liveListings(seller.company.id)).toHaveLength(3);
+
+      // A new quantity is an update of the same listing
+      const changed = stock.map((r) => [...r]);
+      changed[3][3] = 7;
+      const third = await analyzedPreview(seller.token, await xlsxOf(changed));
+      expect(third.p.body.rows[0].action).toBe('update');
+      const upd = await commit(seller.token, { rows: rowsForCommit(third.p.body.rows) }).expect(200);
+      expect(upd.body.counts).toMatchObject({ created: 0, updated: 1, unchanged: 2 });
+      const michelin = () => listingRepo.findOneByOrFail({ company_id: seller.company.id, brand: 'Michelin' });
+      expect((await michelin()).qty).toBe(7);
+
+      // The older import cannot be undone over the newer one
+      await request(httpServer)
+        .post(`/api/listings/import/batches/${created.body.batch_id}/undo`)
+        .set('Authorization', `Bearer ${seller.token}`)
+        .expect(409);
+
+      // Someone else's import cannot be undone at all
+      const other = await makeActiveUser();
+      await request(httpServer)
+        .post(`/api/listings/import/batches/${upd.body.batch_id}/undo`)
+        .set('Authorization', `Bearer ${other.token}`)
+        .expect(404);
+
+      await request(httpServer)
+        .post(`/api/listings/import/batches/${upd.body.batch_id}/undo`)
+        .set('Authorization', `Bearer ${seller.token}`)
+        .expect(200);
+      expect((await michelin()).qty).toBe(12);
+
+      await request(httpServer)
+        .post(`/api/listings/import/batches/${created.body.batch_id}/undo`)
+        .set('Authorization', `Bearer ${seller.token}`)
+        .expect(200);
+      expect(await liveListings(seller.company.id)).toHaveLength(0);
+      expect(await listingRepo.countBy({ company_id: seller.company.id })).toBe(3); // soft deleted, kept
+      expect((await batchRepo.findOneByOrFail({ id: created.body.batch_id })).status).toBe('undone');
+    });
+
+    it('re-checks every row on commit and rejects forged data', async () => {
+      const seller = await makeActiveUser();
+      const victim = await makeActiveUser();
+      const good = { brand: 'Michelin', size: '315/70R22.5', qty: 3, condition: 'new', location_country: 'DE' };
+
+      const res = await commit(seller.token, {
+        rows: [
+          { row: 1, data: good },
+          { row: 2, data: { ...good, size: '999/99R99', pattern: 'a' } },
+          { row: 3, data: { ...good, qty: 0, pattern: 'b' } },
+          { row: 4, data: { ...good, company_id: victim.company.id, pattern: 'c' } },
+          { row: 5, data: { ...good, status: 'inactive', pattern: 'd' } },
+          { row: 6, data: { ...good, additional_sizes: ['1', '2', '3', '4'], pattern: 'e' } },
+          { row: 7, data: { ...good } }, // same key as row 1
+        ],
+      }).expect(200);
+      expect(res.body.counts).toMatchObject({ created: 1, skipped: 6 });
+      expect(res.body.errors.map((e: { row: number }) => e.row)).toEqual([2, 3, 4, 5, 6, 7]);
+      expect(await listingRepo.countBy({ company_id: victim.company.id })).toBe(0);
+
+      // Unknown fields around the rows are refused outright
+      await commit(seller.token, { rows: [{ row: 1, data: good, company_id: victim.company.id }] }).expect(400);
+      await commit(seller.token, { rows: [], segment: 'XXX' }).expect(400);
+    });
+
+    it('deactivates listings missing from the file only with the confirmed count', async () => {
+      const seller = await makeActiveUser();
+      const base = { brand: 'Michelin', qty: 3, condition: 'new', location_country: 'DE' };
+      await commit(seller.token, { rows: [{ row: 1, data: { ...base, size: '315/80R22.5' } }, { row: 2, data: { ...base, size: '315/70R22.5' } }] }).expect(200);
+
+      const next = { rows: [{ row: 1, data: { ...base, size: '315/80R22.5' } }], deactivate_missing: true };
+      const dry = await commit(seller.token, { ...next, dry_run: true }).expect(200);
+      expect(dry.body.summary.missing).toBe(1);
+      await commit(seller.token, { ...next, expected_deactivate: 0 }).expect(409);
+      const done = await commit(seller.token, { ...next, expected_deactivate: 1 }).expect(200);
+      expect(done.body.counts.deactivated).toBe(1);
+      const l = await listingRepo.findOneByOrFail({ company_id: seller.company.id, size_raw: '315/70R22.5' });
+      expect(l.status).toBe('inactive');
+
+      // By default listings missing from a file are left alone
+      const keep = await commit(seller.token, { rows: [{ row: 1, data: { ...base, size: '385/65R22.5' } }] }).expect(200);
+      expect(keep.body.counts.deactivated).toBe(0);
+      expect((await listingRepo.findOneByOrFail({ id: l.id })).status).toBe('inactive');
+    });
+
+    it('finds an imported listing by its second size, once', async () => {
+      const seller = await makeActiveUser();
+      const buyer = await makeActiveUser({ country: 'PL' });
+      const brand = 'Mitas';
+      const pattern = `P-${randomUUID().slice(0, 8)}`;
+      await commit(seller.token, {
+        segment: 'AGRI',
+        rows: [{ row: 1, data: { brand, pattern, size: '16.9-28', additional_sizes: ['440/80-28'], qty: 2, condition: 'new', location_country: 'DE' } }],
+      }).expect(200);
+      const res = await request(httpServer)
+        .get('/api/listings')
+        .query({ q: '440/80-28', brand })
+        .set('Authorization', `Bearer ${buyer.token}`)
+        .expect(200);
+      const hits = res.body.data.filter((r: { pattern: string }) => r.pattern === pattern);
+      expect(hits).toHaveLength(1);
+      expect(hits[0].matched_size).toBe('440/80-28');
+    });
+
+    it('warns about different rims in an import, but the form asks for confirmation', async () => {
+      const seller = await makeActiveUser();
+      const res = await commit(seller.token, {
+        segment: 'AGRI',
+        rows: [{ row: 1, data: { brand: 'Mitas', size: '16.9-28', additional_sizes: ['440/80-30'], qty: 2, condition: 'new', location_country: 'DE' } }],
+        dry_run: true,
+      }).expect(200);
+      expect(res.body.counts.created).toBe(1);
+      expect(res.body.summary.warnings).toBe(1);
+
+      const form = { ...baseListing, segment: 'AGRI', size: '16.9-28', additional_sizes: ['440/80-30'] };
+      await request(httpServer).post('/api/listings').set('Authorization', `Bearer ${seller.token}`).send(form).expect(409);
+      const ok = await request(httpServer)
+        .post('/api/listings')
+        .set('Authorization', `Bearer ${seller.token}`)
+        .send({ ...form, confirm_rim_mismatch: true })
+        .expect(201);
+      createdListingIds.push(ok.body.id);
+    });
+
+    it('takes formula results without evaluating, and survives hostile files', async () => {
+      const seller = await makeActiveUser();
+      const withFormula = await xlsxOf(
+        [['Size', 'Brand', 'Qty'], ['315/80R22.5', 'Michelin', 1]],
+        (ws) => { ws.getCell('C2').value = { formula: 'HYPERLINK("http://evil","x")*0+4', result: 4 } as ExcelJS.CellFormulaValue; },
+      );
+      const { p } = await analyzedPreview(seller.token, withFormula);
+      expect(p.body.rows[0].data.qty).toBe(4);
+
+      // > 5 MB
+      await analyze(seller.token, Buffer.alloc(6 * 1024 * 1024, 0x41), 'big.csv', 'text/csv').expect(413);
+      // Old .xls, and a renamed binary
+      await analyze(seller.token, Buffer.from('d0cf11e0a1b11ae1000000000000', 'hex'), 'old.xls', 'application/vnd.ms-excel').expect(400);
+      await analyze(seller.token, Buffer.from([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]), 'x.csv', 'text/csv').expect(400);
+      // Zip bomb: 50 MB of zeros packed into a few kB
+      await analyze(seller.token, zipOf('xl/worksheets/sheet1.xml', Buffer.alloc(50 * 1024 * 1024)), 'bomb.xlsx').expect(400);
+      // Server still answers
+      await analyze(seller.token, withFormula).expect(200);
+    });
+
+    it('limits request bodies outside the import commit', async () => {
+      const seller = await makeActiveUser();
+      await request(httpServer)
+        .post('/api/listings')
+        .set('Authorization', `Bearer ${seller.token}`)
+        .send({ ...baseListing, comment: 'x'.repeat(200 * 1024) })
+        .expect(413);
+    });
+  });
+
+  // Minimal one-entry ZIP (deflate), enough for the zip-bomb guard to inspect
+  function zipOf(name: string, content: Buffer): Buffer {
+    const data = deflateRawSync(content, { level: 9 });
+    const n = Buffer.from(name);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(8, 8);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(content.length, 22);
+    local.writeUInt16LE(n.length, 26);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(8, 10);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(content.length, 24);
+    central.writeUInt16LE(n.length, 28);
+    central.writeUInt32LE(0, 42);
+    const cdOffset = local.length + n.length + data.length;
+    const eocd = Buffer.alloc(22);
+    eocd.writeUInt32LE(0x06054b50, 0);
+    eocd.writeUInt16LE(1, 8);
+    eocd.writeUInt16LE(1, 10);
+    eocd.writeUInt32LE(central.length + n.length, 12);
+    eocd.writeUInt32LE(cdOffset, 16);
+    return Buffer.concat([local, n, data, central, n, eocd]);
+  }
+
+  // ── 11. Rate limiting ─────────────────────────────────────────────────────
   // Runs last and in isolation: every prior test in this file authenticates
   // via signed JWTs (see makeActiveUser), never via POST /auth/login, so
   // nothing here has already spent part of the per-IP login quota.

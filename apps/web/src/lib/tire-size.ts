@@ -5,6 +5,8 @@ export {
   parsePartialSize,
   normaliseSizeQuery,
   FORMAT_LABELS,
+  TIRE_TYPES,
+  SEGMENTS,
   parseLoadIndex,
   formatLoadIndex,
 } from '@tyreterra/tire-size';
@@ -14,5 +16,6 @@ export type {
   PartialSize,
   SizeCandidate,
   PartialFormat,
+  Segment,
   ParsedLoadIndex,
 } from '@tyreterra/tire-size';

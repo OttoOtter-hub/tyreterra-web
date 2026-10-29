@@ -108,7 +108,9 @@ id, email (unique), password_hash, role (`dealer`/`distributor`/`admin`), status
 | sku | varchar(100), nullable | seller's own article number |
 | size_format / size_width / size_aspect_ratio / size_construction / size_rim / size_raw | parsed tire size — see §5 |
 | pattern | varchar(100), nullable | |
-| load_index | varchar(30), nullable | e.g. `12PR`, `173D/178A8` |
+| load_index | varchar(30), nullable | as the seller wrote it, e.g. `12PR`, `173D/178A8`, `16PR (132B)` |
+| load_index_single / speed_single / load_index_dual / speed_dual / ply_rating | smallint / varchar(3), nullable | parsed from `load_index` by `parseLoadIndex` (null when unreadable); indexed: `ply_rating`, `load_index_single` |
+| comment | varchar(500), nullable | seller note shown with the listing |
 | origin_country | varchar(100), nullable | ISO alpha-2 code, country of manufacture |
 | qty | integer ≥1 | |
 | dot_code | char(4), nullable | **repurposed as production year (YYYY)** |
@@ -145,7 +147,13 @@ id, user_id → users (cascade delete), token_hash, expires_at, used_at, created
 ### `ratings`, `audit_log`
 Rating score/interaction_count per company; `audit_log` records `event_type`, `actor_id`, `target_id`, `target_type`, `payload` (jsonb) for every mutating action.
 
-### Migrations (all 8 applied, tracked in the `migrations` table)
+### `listing_sizes`
+All sizes of a listing: position 0 = the main size (mirrored in `listings.size_*`), 1–3 = additional sizes (e.g. `440/80-28` for a `16.9-28`). Same parsed columns as the listing; `UNIQUE(listing_id, position)`, cascade delete, indexed `(width, rim, construction)`. Catalogue search matches any size (`EXISTS`), each listing once.
+
+### `import_batches`, `import_batch_items`, `import_mappings`
+Smart import: one batch per committed file (company, user, segment, counts, `completed`/`undone`); items record each touched listing with its action (`created/updated/deactivated`) and the pre-update snapshot used by undo; mappings remember a company's column mapping per header layout (sha256 of normalised headers).
+
+### Migrations (tracked in the `migrations` table)
 1. `InitialSchema` — base schema
 2. `AddLoadIndexOriginCountry` — listings.load_index, origin_country
 3. `AddMessageAttachments` — messages.file_url, file_name; body made nullable
@@ -154,6 +162,11 @@ Rating score/interaction_count per company; `audit_log` records `event_type`, `a
 6. `AddDealStatus` — deals.status, completed_at
 7. `AddDeletedAtToListings` — listings.deleted_at + index (soft delete)
 8. `AddPasswordResetTokens` — password_reset_tokens table
+9. `AddListingSizes` (1750000000009) — listing_sizes; backfills position 0 from every listing
+10. `AddLoadIndexFieldsAndComment` (1750000000010) — parsed load index / speed / ply columns + comment; backfills by parsing existing `load_index`
+11. `AddImportBatchesAndMappings` (1750000000011) — import_batches, import_batch_items, import_mappings
+
+(Number 1750000000008 is reserved for the paused `feature/resend-email` branch.)
 
 ---
 
@@ -188,7 +201,13 @@ Size is editable after listing creation — `PATCH /listings/:id` re-parses if `
 
 **Partial parser** (`parsePartialSize`, `src/partial.ts`) — used for search and for hints while typing. Never throws; returns `{width?, aspect?, construction?, rim?, format, confidence, candidates[]}` (up to 5 readings, confidences sum to 1). Understands any case, spaces, comma decimals (`22,5`), separators `/ - x` and space, a missing `R` (construction then unconstrained), glued digits (`31580R225`, `38565225`: width 3–4 digits, aspect 25–95 step 5, rim 2 digits or 3 digits ending in 5 = x.5), and input that is still being typed (`315`, `315/`, `315/80R`). Ambiguous input returns several candidates instead of a silent guess; garbage returns none.
 
-Known quirk of the strict parser (unchanged): it accepts glued nonsense such as `31580R225` as a radial inch size (width 31580, rim 225"). The listing form shows a "Did you mean 315/80R22.5?" hint from the partial parser in that case.
+The strict parser checks spelling only; `implausibleSize` (`src/plausible.ts`) rejects numbers no tyre has (rim outside 4–63", width outside 2–60" and 100–1600 mm, profile outside 20–110). Listing create/update and the import both apply it, so `999/99R99` or a glued `31580R225` read literally is refused. The listing form shows a "Did you mean 315/80R22.5?" hint from the partial parser.
+
+**Load index** (`parseLoadIndex`, `src/load-index.ts`) — one parser for the form hint, the API and the import. Case and spaces ignored; `160K` → single 160 K; `160K/164J` → single + dual; `156/150L` → L for both; `173D/178A8`; `16PR`, `12 PR`, `PR16`, `16 ply` → ply; `16PR (132B)`, `132B 16PR` → ply + single. Unreadable text is kept, parsed fields null, with a warning.
+
+**Glued cells** (`parseGluedCell`, `src/cell.ts`) — reads everything out of one cell: all sizes (incl. ones in brackets, glued digits, comma decimals, LT/ZR), qty (`14pcs`, `x14`, `14 шт`, `qty 14`), year/DOT, load index and ply, condition, tyre type of the segment, country ("made in …", names in 6 languages), brand (fixed directory `src/brands.ts`, aliases incl. Cyrillic, typo-tolerant), pattern (text next to the brand). Whatever is left is returned as `unrecognized` — never dropped. Field parsers: `parseQty`, `parseYear`, `parseCondition`, `parsePrice` (comma decimals, €/$/EUR/USD, ambiguous `1,234` flagged), `parseTireType`.
+
+Not supported yet: "x" sizes (`28x9-15`, `18x7-8`, `31x10.50R15`) — reported as an unsupported size in the import, never guessed.
 
 ---
 
@@ -208,8 +227,15 @@ All routes prefixed `/api`. JWT bearer required unless noted.
 - `GET /mine` — own company's listings (all statuses except deleted), decrypted price included
 - `GET /export` — Excel download of own listings
 - `GET /import/template` — Excel template download
-- `POST /import` — bulk-create from uploaded `.xlsx`; **aborts entirely on first row error**, returns row number + message
-- `GET /?segment=&tire_type=&brand=&q=&size_raw=&location_country=&condition=&qty_min=&min_rating=&page=&limit=` — catalogue search (active, non-deleted, non-expired listings visible to the viewer; no price)
+- `POST /import` — fixed-template bulk create from `.xlsx` (fallback to the smart import); **aborts entirely on first row error**; reads an `Alt size` column (`;`-separated)
+- Smart import (`/listings/import/*`, `listings/import/`): JWT + active company, 30 requests/min per user (commit 20/min). Files stay in memory (≤5 MB, ≤5000 rows, signature + MIME + extension checked, zip-bomb guard before unpacking, formulas never evaluated — the saved result is taken), row contents are never logged.
+  - `POST /import/analyze` (multipart `file`, `segment`, optional `sheet`, `header_row`) — sheets, detected header row, columns with type / confidence / 5 samples / glued flag, saved mapping applied when the header layout matches
+  - `POST /import/preview` (multipart `file` + `options` JSON: segment, sheet, header_row, mapping, defaults {condition, location_country, location_region, tire_type}, update_mode) — rows in our model with status ok/warning/error, messages, unrecognized text, alternatives, action new/update/unchanged/skip; file-level hint when sizes look like another segment. Writes nothing.
+  - `POST /import/commit` (JSON, body ≤ 8 MB) — re-validates every row with `CreateListingDto` + size rules (unknown fields, another company, qty 0, bad size → that row is an error); `dry_run` returns the re-checked rows; creates/updates in one transaction as a batch with snapshots, audit `listings.imported`, saves the mapping, returns counts + `errors_csv` (CSV-injection escaped). Update key: seller SKU, else segment + brand + pattern + main size + year; the same tyre twice in a file is an error. Listings missing from the file are untouched unless `deactivate_missing` with `expected_deactivate` equal to the server's count (409 otherwise).
+  - `GET /import/batches` — the company's imports of the last 24 h
+  - `POST /import/batches/:id/undo` — own company only, within 24 h, refused while a later import touched the same listings; created listings are soft-deleted, updated ones restored from the snapshot (incl. sizes), deactivated ones re-activated; audit `listings.import_undone`
+- Rim rule: all sizes of a listing must share the rim diameter. Form/API answer 409 unless `confirm_rim_mismatch: true`; the import only warns.
+- `GET /?segment=&tire_type=&brand=&q=&size_raw=&location_country=&condition=&qty_min=&ply_rating=&load_index_min=&min_rating=&page=&limit=` — catalogue search (active, non-deleted, non-expired listings visible to the viewer; no price)
   - `q` — free-form size, parsed with `parsePartialSize`; matches by components (width/aspect/construction/rim), unspecified components don't constrain, ambiguous readings are OR'ed. When nothing matches, the response has `nearest`: up to 5 sizes with the same width and rim (and construction, if given) and the closest profiles. Unreadable `q` → empty result.
   - `size_raw` — legacy (old links); unchanged: width + rim + construction, ignores aspect, no `nearest`. `q` wins when both are given.
   - Visibility: the rule in `listing-visibility.ts` (below), the same for search, suggestions and nearest sizes.
@@ -286,7 +312,7 @@ All routes prefixed `/api`. JWT bearer required unless noted.
 | `/catalogue/[id]` | Listing detail + "Send Request" form |
 | `/listings` | My Listings — filters, multi-select checkboxes, bulk activate/deactivate/delete, per-row Edit/Activate-Deactivate/Delete, Excel export/import buttons |
 | `/listings/new`, `/listings/[id]/edit` | Create/edit listing form (segment→tire_type cascading select, CountrySelect, price fields marked "private") |
-| `/listings/import` | Two-step Excel bulk upload UI |
+| `/listings/import` | Smart import wizard: 1 file + segment + defaults, 2 column mapping (sheet, header row, saved mapping), 3 editable preview (100 rows/page, "only problematic", bulk set condition/country/region/type, unrecognized text → pattern/comment/ignore, alternative readings, swap main size), 4 summary → import → report with "Download errors" and "Undo import". The fixed template upload stays as a fallback under step 1. |
 | `/requests`, `/requests/[id]` | Incoming/outgoing requests; seller sees recommended price with "Use this price" button; full `TireInfo` block |
 | `/deals`, `/deals/[id]` | Deal list with seller/buyer names + pickup status badge; deal chat with file attachments and "I received the goods" button (buyer-only) |
 | `/admin`, `/admin/users` | Admin dashboard (KPIs + global Excel export), user approval queue |
@@ -316,7 +342,9 @@ All routes prefixed `/api`. JWT bearer required unless noted.
 | `common/tire-size.parser.spec.ts` | unit | all 6 size formats + invalid input |
 | `vat/vat.service.spec.ts` | unit | VIES lookup, 24 h cache, input normalisation, VIES unavailable |
 | `common/serializers.spec.ts` | unit | response serializers: owner-only price, no ciphertext or contacts, nested request/offer/deal |
-| `test/critical-paths.e2e.spec.ts` | integration | price never leaks to non-owners, soft delete hides rows, auth guards (401, pending/blocked login), contact reveal only after deal, listing visibility, no secret fields or ciphertext in any listing-returning endpoint, login rate limit (429) |
+| `listings/import/columns.spec.ts` | unit | column detection on 9 synthetic files (6 languages, title block, glued cells, junk rows, no header, two size columns), sheet pick, CSV reading/encodings, file signatures, formulas, zip guard, CSV injection |
+| `packages/tire-size/src/*.spec.ts` | unit | strict + partial size parsers, load index (all forms + unrecognised), 49 glued cells, field parsers, brands (typos), countries, plausibility |
+| `test/critical-paths.e2e.spec.ts` | integration | price never leaks to non-owners, soft delete hides rows, auth guards (401, pending/blocked login), contact reveal only after deal, listing visibility, no secret fields or ciphertext in any listing-returning endpoint, size search, several sizes per listing, smart import (messy file, update by key / no duplicates on re-upload, undo, forged commit rows, deactivate with confirmed count, search by second size, rim rule, formulas / oversized / .xls / zip bomb, body limits), login rate limit (429) |
 
 The e2e suite needs a real **disposable** database (e.g. the local `docker-compose.yml` Postgres) — never staging or production. It builds the schema by running the migrations before the app starts.
 
@@ -333,5 +361,8 @@ The e2e suite needs a real **disposable** database (e.g. the local `docker-compo
 - Migrations and entity definitions differ cosmetically (types, enum/index names); `synchronize` must stay off. A cleanup migration could align them.
 - `dealer`/`distributor`: users still carry the role; listings can be limited by `allowed_roles` (enforced), but no UI sets it.
 - `visible_regions` is enforced but no UI sets it yet.
+- Brand directory is a fixed list in `packages/tire-size/src/brands.ts`; unknown brands are imported as `Other` (original text offered for pattern/comment). Extending it is a code change.
+- "x" sizes (`28x9-15`, `18x7-8`, `31x10.50R15`) are not supported by the size parser yet.
+- `npm audit` (2026-10-29, after the dependency update): no critical. What remains needs Nest 11/12 (`@nestjs/core`, moderate), sits in Nest CLI build tooling, or is in code paths not used (`file-type` in `@nestjs/common`, `uuid` in exceljs). The import reads files with exceljs 4.4.0; the abandoned npm `xlsx` 0.18.5 was not used (prototype pollution CVE-2023-30533, ReDoS CVE-2024-22363; fixes only on the SheetJS CDN).
 - Single admin account (created with `seed-admin.ts`), no admin invite flow.
 - Planned future work: Distributor Orders module and role reintroduction — see `docs/future/`.
