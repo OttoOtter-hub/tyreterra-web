@@ -32,7 +32,7 @@ import {
   parseListingSizes,
   writeListingSizes,
 } from './listing-sizes';
-import { assertRimsOrConfirmed } from './listing-rules';
+import { assertRimsOrConfirmed, loadIndexColumns } from './listing-rules';
 import { EncryptionService } from '../common/encryption.service';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { CreateListingDto } from './dto/create-listing.dto';
@@ -67,6 +67,12 @@ export interface CatalogueItem {
   pattern: string | null;
   sku: string | null;
   load_index: string | null;
+  load_index_single: number | null;
+  speed_single: string | null;
+  load_index_dual: number | null;
+  speed_dual: string | null;
+  ply_rating: number | null;
+  comment: string | null;
   origin_country: string | null;
   dot_code: string | null;
   qty: number;
@@ -138,12 +144,14 @@ export class ListingsService {
       tire_type: dto.tire_type ?? null,
       pattern: dto.pattern ?? null,
       load_index: dto.load_index ?? null,
+      ...loadIndexColumns(dto.load_index).columns,
       origin_country: dto.origin_country ?? null,
       qty: dto.qty,
       dot_code: dto.dot_code ?? null,
       location_country: dto.location_country.toUpperCase(),
       location_region: dto.location_region ?? null,
       condition: dto.condition,
+      comment: dto.comment ?? null,
       visible_regions: dto.visible_regions ?? null,
       exclude_own_region: dto.exclude_own_region ?? false,
       price_internal_encrypted: dto.price != null
@@ -365,6 +373,8 @@ export class ListingsService {
     if (dto.min_rating) {
       qb.andWhere('r.score >= :min_rating', { min_rating: dto.min_rating });
     }
+    if (dto.ply_rating) qb.andWhere('l.ply_rating = :ply', { ply: dto.ply_rating });
+    if (dto.load_index_min) qb.andWhere('l.load_index_single >= :li_min', { li_min: dto.load_index_min });
   }
 
   async findOne(id: string, viewer: User): Promise<ListingResponse | Omit<ListingResponse, 'company'> & { seller_country: string | null }> {
@@ -399,6 +409,7 @@ export class ListingsService {
       listing.price_internal_encrypted = this.encryption.encrypt(String(rest.price));
       listing.price_currency = rest.currency ?? listing.price_currency ?? 'EUR';
     }
+    if (rest.load_index !== undefined) Object.assign(listing, loadIndexColumns(rest.load_index).columns);
     // Remove virtual fields before assign to avoid TypeORM issues
     const { price, currency, confirm_rim_mismatch, ...dbRest } = rest;
     Object.assign(listing, dbRest);
@@ -567,6 +578,12 @@ export class ListingsService {
       pattern: l.pattern,
       sku: l.sku,
       load_index: l.load_index,
+      load_index_single: l.load_index_single,
+      speed_single: l.speed_single,
+      load_index_dual: l.load_index_dual,
+      speed_dual: l.speed_dual,
+      ply_rating: l.ply_rating,
+      comment: l.comment,
       origin_country: l.origin_country,
       dot_code: l.dot_code,
       qty: l.qty,

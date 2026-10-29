@@ -45,6 +45,7 @@ interface CatalogueRow extends TireListing {
   location_country: string;
   seller_rating: number | null | undefined;
   created_at: string;
+  comment?: string | null;
 }
 
 interface SearchResult {
@@ -56,7 +57,7 @@ interface SearchResult {
 
 const EMPTY_FILTERS = {
   segment: '', tire_type: '', brand: '', q: '', location_country: '',
-  condition: '', qty_min: '', page: 1,
+  condition: '', qty_min: '', ply_rating: '', load_index_min: '', page: 1,
 };
 type Filters = typeof EMPTY_FILTERS;
 
@@ -195,6 +196,14 @@ export default function CataloguePage() {
             <label>Min qty</label>
             <input className="form-control" type="number" min={1} value={filters.qty_min} onChange={setF('qty_min')} style={{ width: 80 }} />
           </div>
+          <div className="form-group">
+            <label>Ply (PR)</label>
+            <input className="form-control" type="number" min={1} max={60} value={filters.ply_rating} onChange={setF('ply_rating')} style={{ width: 70 }} />
+          </div>
+          <div className="form-group">
+            <label>Load index from</label>
+            <input className="form-control" type="number" min={1} max={300} value={filters.load_index_min} onChange={setF('load_index_min')} style={{ width: 80 }} />
+          </div>
           <button
             className="btn btn-primary"
             onClick={() => (sizeInput.trim() !== filters.q ? setSize(sizeInput) : search())}
@@ -286,6 +295,7 @@ export default function CataloguePage() {
                         {l.load_index && <div><b style={{ color: '#374151' }}>LI:</b> {l.load_index}</div>}
                         {l.dot_code    && <div><b style={{ color: '#374151' }}>Year:</b> {l.dot_code}</div>}
                         {l.origin_country && <div><b style={{ color: '#374151' }}>Origin:</b> {countryByCode[l.origin_country] ?? l.origin_country}</div>}
+                        {l.comment && <div className="catalogue-comment" title={l.comment}>{l.comment}</div>}
                       </td>
 
                       {/* Qty */}

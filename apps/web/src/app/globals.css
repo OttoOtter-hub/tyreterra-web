@@ -168,3 +168,4 @@ button.size-alt:hover { border-color: var(--color-primary); color: var(--color-p
 .additional-sizes { display: flex; flex-direction: column; gap: .5rem; align-items: flex-start; }
 .additional-size-row { display: flex; gap: .5rem; align-items: flex-start; width: 100%; }
 .additional-size-input { flex: 1; }
+.catalogue-comment { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text); }

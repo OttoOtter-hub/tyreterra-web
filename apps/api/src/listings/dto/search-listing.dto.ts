@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString, IsInt, IsNumber, Min, Length, MaxLength } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsInt, IsNumber, Min, Max, Length, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 import { TireSegment, TireCondition } from '../entities/listing.entity';
 
@@ -75,6 +75,22 @@ export class SearchListingDto {
   @Min(1)
   @Type(() => Number)
   min_rating?: number;
+
+  // Exact ply rating, e.g. 16 for 16PR
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(60)
+  @Type(() => Number)
+  ply_rating?: number;
+
+  // Minimum (single) load index, e.g. 154
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(300)
+  @Type(() => Number)
+  load_index_min?: number;
 }
 
 export class SizeSuggestDto {

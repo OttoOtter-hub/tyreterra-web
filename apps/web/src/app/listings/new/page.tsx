@@ -5,6 +5,7 @@ import Navbar from '../../../components/Navbar';
 import TireSizeInput from '../../../components/TireSizeInput';
 import AdditionalSizesInput from '../../../components/AdditionalSizesInput';
 import CountrySelect from '../../../components/CountrySelect';
+import LoadIndexHint from '../../../components/LoadIndexHint';
 import { withRimConfirm } from '../../../lib/rim-confirm';
 import { api } from '../../../lib/api';
 
@@ -36,7 +37,7 @@ export default function NewListingPage() {
     segment: 'TBR', tire_type: '', brand: '', size: '', pattern: '', sku: '',
     qty: '', production_year: '', load_index: '', origin_country: '',
     location_country: '', location_region: '', price: '', currency: 'EUR',
-    condition: 'new', exclude_own_region: false,
+    condition: 'new', exclude_own_region: false, comment: '',
     additional_sizes: [] as string[],
   });
   const [error, setError] = useState('');
@@ -75,6 +76,7 @@ export default function NewListingPage() {
         origin_country: form.origin_country || undefined,
         dot_code: form.production_year || undefined,
         location_region: form.location_region || undefined,
+        comment: form.comment.trim() || undefined,
         exclude_own_region: form.exclude_own_region,
         confirm_rim_mismatch,
       }));
@@ -155,6 +157,7 @@ export default function NewListingPage() {
                   <label>Load index</label>
                   <input className="form-control" value={form.load_index} onChange={set('load_index')}
                     placeholder="12PR, 173D, 173D/178A8" maxLength={30} />
+                  <LoadIndexHint value={form.load_index} />
                 </div>
                 <div className="form-group">
                   <label>Year of production</label>
@@ -182,6 +185,13 @@ export default function NewListingPage() {
                     <option>EUR</option><option>USD</option><option>GBP</option>
                   </select>
                 </div>
+              </div>
+
+              <div className="form-group">
+                <label>Comment</label>
+                <textarea className="form-control" rows={2} maxLength={500} value={form.comment}
+                  onChange={e => setForm(f => ({ ...f, comment: e.target.value }))}
+                  placeholder="Shown to buyers with the listing, e.g. delivery terms" />
               </div>
 
               <div className="form-group">

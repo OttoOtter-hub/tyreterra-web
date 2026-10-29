@@ -801,7 +801,49 @@ describe('Critical paths (e2e)', () => {
     });
   });
 
-  // ── 9. Rate limiting ──────────────────────────────────────────────────────
+  // ── 9. Load index and comment ─────────────────────────────────────────────
+  describe('Load index and comment', () => {
+    it('parses load_index into columns on create and update, and filters by ply / load index', async () => {
+      const seller = await makeActiveUser();
+      const buyer = await makeActiveUser({ country: 'PL' });
+      const brand = `LoadIdx-${randomUUID().slice(0, 8)}`;
+      const post = async (body: Record<string, unknown>) => {
+        const res = await request(httpServer)
+          .post('/api/listings')
+          .set('Authorization', `Bearer ${seller.token}`)
+          .send({ ...baseListing, brand, ...body })
+          .expect(201);
+        createdListingIds.push(res.body.id);
+        return res.body.id as string;
+      };
+      const heavy = await post({ load_index: '156/150L 18PR', comment: 'Ready to ship' });
+      const light = await post({ load_index: '132B 16PR' });
+
+      expect(await listingRepo.findOneByOrFail({ id: heavy })).toMatchObject({
+        load_index: '156/150L 18PR', load_index_single: 156, speed_single: 'L',
+        load_index_dual: 150, ply_rating: 18, comment: 'Ready to ship',
+      });
+
+      const find = async (query: Record<string, string>) =>
+        (await request(httpServer).get('/api/listings').query({ brand, ...query })
+          .set('Authorization', `Bearer ${buyer.token}`).expect(200)).body.data.map((r: { id: string }) => r.id);
+      expect(await find({ ply_rating: '16' })).toEqual([light]);
+      expect(await find({ load_index_min: '150' })).toEqual([heavy]);
+
+      const one = await request(httpServer).get(`/api/listings/${heavy}`)
+        .set('Authorization', `Bearer ${buyer.token}`).expect(200);
+      expect(one.body.comment).toBe('Ready to ship');
+
+      // Unreadable text is kept, the parsed columns are cleared
+      await request(httpServer).patch(`/api/listings/${heavy}`)
+        .set('Authorization', `Bearer ${seller.token}`).send({ load_index: 'see photo' }).expect(200);
+      expect(await listingRepo.findOneByOrFail({ id: heavy })).toMatchObject({
+        load_index: 'see photo', load_index_single: null, ply_rating: null,
+      });
+    });
+  });
+
+  // ── 10. Rate limiting ─────────────────────────────────────────────────────
   // Runs last and in isolation: every prior test in this file authenticates
   // via signed JWTs (see makeActiveUser), never via POST /auth/login, so
   // nothing here has already spent part of the per-IP login quota.

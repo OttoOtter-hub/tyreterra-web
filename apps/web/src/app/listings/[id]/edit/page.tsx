@@ -5,6 +5,7 @@ import Navbar from '../../../../components/Navbar';
 import TireSizeInput from '../../../../components/TireSizeInput';
 import AdditionalSizesInput from '../../../../components/AdditionalSizesInput';
 import CountrySelect from '../../../../components/CountrySelect';
+import LoadIndexHint from '../../../../components/LoadIndexHint';
 import { withRimConfirm } from '../../../../lib/rim-confirm';
 import { api } from '../../../../lib/api';
 
@@ -36,7 +37,7 @@ interface ListingData {
   load_index: string | null; origin_country: string | null; dot_code: string | null;
   qty: number; condition: string; location_country: string; location_region: string | null;
   exclude_own_region: boolean; allowed_roles: string;
-  price?: number | null; currency?: string | null;
+  price?: number | null; currency?: string | null; comment?: string | null;
 }
 
 export default function EditListingPage() {
@@ -50,7 +51,7 @@ export default function EditListingPage() {
     sku: '', load_index: '', origin_country: '', production_year: '',
     qty: '', condition: 'new', location_country: '', location_region: '',
     price: '', currency: 'EUR', exclude_own_region: false,
-    additional_sizes: [] as string[],
+    additional_sizes: [] as string[], comment: '',
   });
 
   useEffect(() => {
@@ -74,6 +75,7 @@ export default function EditListingPage() {
           currency: l.currency ?? 'EUR',
           exclude_own_region: l.exclude_own_region,
           additional_sizes: l.additional_sizes ?? [],
+          comment: l.comment ?? '',
         });
       })
       .catch(() => setError('Listing not found'))
@@ -111,6 +113,7 @@ export default function EditListingPage() {
         condition: form.condition,
         location_country: form.location_country.toUpperCase(),
         location_region: form.location_region || undefined,
+        comment: form.comment.trim(),
         exclude_own_region: form.exclude_own_region,
         confirm_rim_mismatch,
       }));
@@ -199,12 +202,20 @@ export default function EditListingPage() {
                 <div className="form-group">
                   <label>Load index</label>
                   <input className="form-control" value={form.load_index} onChange={set('load_index')} placeholder="12PR, 173D…" maxLength={30} />
+                  <LoadIndexHint value={form.load_index} />
                 </div>
                 <div className="form-group">
                   <label>Year of production</label>
                   <input className="form-control" type="number" min={2000} max={2030}
                     value={form.production_year} onChange={set('production_year')} placeholder="2023" />
                 </div>
+              </div>
+
+              <div className="form-group">
+                <label>Comment</label>
+                <textarea className="form-control" rows={2} maxLength={500} value={form.comment}
+                  onChange={e => setForm(f => ({ ...f, comment: e.target.value }))}
+                  placeholder="Shown to buyers with the listing, e.g. delivery terms" />
               </div>
 
               <div className="form-group">

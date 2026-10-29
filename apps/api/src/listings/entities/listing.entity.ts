@@ -66,6 +66,26 @@ export class Listing {
   @Column({ type: 'numeric', precision: 5, scale: 1, nullable: true, name: 'size_aspect_ratio' })
   size_aspect_ratio: number | null;
 
+  // Parsed from load_index by the shared parser (null when not readable)
+  @Column({ type: 'smallint', nullable: true, name: 'load_index_single' })
+  load_index_single: number | null;
+
+  @Column({ type: 'varchar', length: 3, nullable: true, name: 'speed_single' })
+  speed_single: string | null;
+
+  @Column({ type: 'smallint', nullable: true, name: 'load_index_dual' })
+  load_index_dual: number | null;
+
+  @Column({ type: 'varchar', length: 3, nullable: true, name: 'speed_dual' })
+  speed_dual: string | null;
+
+  @Column({ type: 'smallint', nullable: true, name: 'ply_rating' })
+  ply_rating: number | null;
+
+  // Seller note shown with the listing
+  @Column({ type: 'varchar', length: 500, nullable: true })
+  comment: string | null;
+
   @Column({ type: 'varchar', length: 1, name: 'size_construction' })
   size_construction: string;
 

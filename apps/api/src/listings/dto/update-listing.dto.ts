@@ -117,6 +117,12 @@ export class UpdateListingDto {
   @IsEnum(AllowedRoles)
   allowed_roles?: AllowedRoles;
 
+  // Seller note shown with the listing
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  comment?: string;
+
   // The sizes sit on different rims and the seller confirmed that this is right
   @IsOptional()
   @IsBoolean()

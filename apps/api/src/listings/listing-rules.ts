@@ -1,5 +1,5 @@
 import { ConflictException } from '@nestjs/common';
-import { ParsedTireSize } from '@tyreterra/tire-size';
+import { ParsedTireSize, ParsedLoadIndex, parseLoadIndex } from '@tyreterra/tire-size';
 
 // Rules shared by the listing form (create / update) and the smart import,
 // so both accept and warn about exactly the same things.
@@ -20,4 +20,22 @@ export function assertRimsOrConfirmed(sizes: ParsedTireSize[], confirmed?: boole
   if (problem && !confirmed) {
     throw new ConflictException(`${problem}. Check the sizes or confirm to save anyway.`);
   }
+}
+
+/**
+ * Parsed load index / speed / ply columns for a load_index text. Unreadable
+ * text is kept as it is in load_index; the parsed columns are null then.
+ */
+export function loadIndexColumns(text: string | null | undefined): { columns: ParsedLoadIndex; warnings: string[] } {
+  const p = parseLoadIndex(text);
+  return {
+    columns: {
+      load_index_single: p.load_index_single,
+      speed_single: p.speed_single,
+      load_index_dual: p.load_index_dual,
+      speed_dual: p.speed_dual,
+      ply_rating: p.ply_rating,
+    },
+    warnings: p.warnings,
+  };
 }
