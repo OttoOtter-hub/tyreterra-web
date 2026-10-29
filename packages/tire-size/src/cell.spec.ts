@@ -66,8 +66,12 @@ const GLUED: [Segment, string, Expect][] = [
   ['MH', '300-15 Nexen 20PR', { sizes: ['300-15'], brand: 'Nexen', load: '20PR' }],
   ['MH', '5.00-8 10 PR Starco', { sizes: ['5.00-8'], load: '10 PR', rest: 'Starco' }],
   ['MH', '250-15 PR16 Galaxy', { sizes: ['250-15'], brand: 'Galaxy', load: 'PR16' }],
+  // "x" sizes (outer diameter x width - rim)
+  ['MH', '28x9-15 Continental SC20', { sizes: ['28x9-15'], unread: [], brand: 'Continental', pattern: 'SC20' }],
+  ['MH', 'Deli 28 x 9 - 15 S-379 10PR 4 pcs', { sizes: ['28x9-15'], unread: [], qty: 4 }],
+  ['PCR', 'Maxxis 31X10.50R15 LT 6 pcs', { sizes: ['31x10.50R15'], unread: [], qty: 6 }],
+  ['MH', '18×7-8 / 16x6-8 solid 8 pcs', { sizes: ['18x7-8', '16x6-8'], unread: [], qty: 8 }],
   // not readable as a size we store: reported, never dropped
-  ['MH', '28x9-15 Continental SC20', { sizes: [], unread: ['28x9-15'], brand: 'Continental', warns: 1 }],
   ['TBR', 'call for price!!!', { sizes: [], rest: 'call for price!!!' }],
   ['TBR', 'Brand XYZ 999/99R99', { sizes: [], unread: ['999/99R99'], rest: 'Brand XYZ' }],
   ['TBR', '12-8 call', { sizes: [], rest: '12-8 call' }],

@@ -15,9 +15,11 @@ export default function SizeChips({ parsed, onPick }: Props) {
   if (!parsed.candidates.length) return null;
   const [best, ...others] = parsed.candidates;
 
+  // An "x" size (28x9-15) has an outer diameter instead of a profile
   const chips: [string, string][] = [
-    ['Width', String(best.width)],
-    ['Profile', best.aspect !== undefined ? String(best.aspect) : '—'],
+    ...(best.diameter !== undefined ? [['Diameter', `${best.diameter}"`] as [string, string]] : []),
+    ['Width', best.width !== undefined ? String(best.width) : '—'],
+    ...(best.diameter === undefined ? [['Profile', best.aspect !== undefined ? String(best.aspect) : '—'] as [string, string]] : []),
     ['Construction', best.construction ? CONSTRUCTION[best.construction] : 'any'],
     ['Rim', best.rim !== undefined ? `${best.rim}"` : '—'],
   ];

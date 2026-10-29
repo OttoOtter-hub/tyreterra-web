@@ -558,7 +558,7 @@ describe('Critical paths (e2e)', () => {
   // ── 7. Size search and suggestions ───────────────────────────────────────
   // Uses unusual 455/xxR22.5 sizes so other tests' listings do not interfere.
   describe('Size search and suggestions', () => {
-    const SUGGESTION_KEYS = ['aspect', 'construction', 'count', 'rim', 'size', 'width'];
+    const SUGGESTION_KEYS = ['aspect', 'construction', 'count', 'diameter', 'rim', 'size', 'width'];
 
     async function createListing(token: string, extra: Record<string, unknown>) {
       const res = await request(httpServer)
@@ -1148,7 +1148,123 @@ describe('Critical paths (e2e)', () => {
     return Buffer.concat([local, n, data, central, n, eocd]);
   }
 
-  // ── 11. Rate limiting ─────────────────────────────────────────────────────
+  // ── 11. "x" sizes and dot-less inch widths ─────────────────────────────────
+  describe('"x" sizes and dot-less inch widths', () => {
+    const brand = `XSize-${randomUUID().slice(0, 8)}`;
+    const mh = { ...baseListing, segment: 'MH', brand };
+
+    async function post(token: string, body: Record<string, unknown>, status = 201) {
+      const res = await request(httpServer)
+        .post('/api/listings')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...mh, ...body })
+        .expect(status);
+      if (status === 201) createdListingIds.push(res.body.id);
+      return res.body as { id: string };
+    }
+
+    const find = async (token: string, q: string) =>
+      (await request(httpServer).get('/api/listings').query({ brand, q })
+        .set('Authorization', `Bearer ${token}`).expect(200)).body.data.map((r: { id: string }) => r.id).sort();
+
+    it('stores an "x" size with its diameter and finds it only by an "x" query', async () => {
+      const seller = await makeActiveUser();
+      const buyer = await makeActiveUser({ country: 'PL' });
+      const x = await post(seller.token, { size: '28 X 9 - 15' });
+      const plain = await post(seller.token, { size: '9-15' });
+
+      expect(await listingRepo.findOneByOrFail({ id: x.id })).toMatchObject({
+        size_raw: '28x9-15', size_format: 'outer_diameter', size_construction: '-',
+      });
+      const row = await listingRepo.findOneByOrFail({ id: x.id });
+      expect([Number(row.size_outer_diameter), Number(row.size_width), Number(row.size_rim)]).toEqual([28, 9, 15]);
+      expect((await sizeRepo.findOneByOrFail({ listing_id: x.id })).size_outer_diameter).not.toBeNull();
+
+      for (const q of ['28x9-15', '28X9-15', '28 x 9 - 15', '28×9-15', '28x9']) expect(await find(buyer.token, q)).toEqual([x.id]);
+      expect(await find(buyer.token, '9-15')).toEqual([plain.id]); // "9-15" is not 28x9-15
+      expect(await find(buyer.token, '28x9R15')).toEqual([]); // R asked, the tyre is diagonal
+
+      const sug = await request(httpServer).get('/api/listings/size-suggest').query({ q: '28x9' })
+        .set('Authorization', `Bearer ${buyer.token}`).expect(200);
+      expect(sug.body.find((s: { size: string }) => s.size === '28x9-15')).toMatchObject({ diameter: 28, width: 9, rim: 15 });
+    });
+
+    it('checks rims between an "x" main size and its additional sizes', async () => {
+      const seller = await makeActiveUser();
+      await post(seller.token, { size: '28x9-15', additional_sizes: ['8.15-15'] });
+      await post(seller.token, { size: '28x9-15', additional_sizes: ['6.50-10'] }, 409);
+      await post(seller.token, { size: '31x10.50R15', additional_sizes: ['6.50-10'], confirm_rim_mismatch: true });
+      await post(seller.token, { size: '15x9-15' }, 400); // diameter not above the rim
+    });
+
+    it('imports a glued cell with an "x" size', async () => {
+      const seller = await makeActiveUser();
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Stock');
+      ws.addRow(['Description', 'Brand', 'Qty']);
+      ws.addRow(['28 x 9 - 15 SC20 10PR', brand, 4]);
+      const file = Buffer.from(await wb.xlsx.writeBuffer());
+      const xlsx = { filename: 'stock.xlsx', contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
+
+      const a = await request(httpServer).post('/api/listings/import/analyze')
+        .set('Authorization', `Bearer ${seller.token}`).field('segment', 'MH').attach('file', file, xlsx).expect(200);
+      const mapping = Object.fromEntries(a.body.columns.map((c: { index: number; type: string }) => [c.index, c.type]));
+      const p = await request(httpServer).post('/api/listings/import/preview')
+        .set('Authorization', `Bearer ${seller.token}`)
+        .field('options', JSON.stringify({
+          segment: 'MH', sheet: a.body.sheet, header_row: a.body.header_row, mapping,
+          update_mode: 'update', defaults: { condition: 'new', location_country: 'DE' },
+        }))
+        .attach('file', file, xlsx).expect(200);
+      expect(p.body.rows[0].data).toMatchObject({ size: '28x9-15', qty: 4 });
+
+      const rows = p.body.rows.map((r: { row: number; data: unknown; unrecognized: string | null }) => ({ row: r.row, data: r.data, unrecognized: r.unrecognized }));
+      await request(httpServer).post('/api/listings/import/commit')
+        .set('Authorization', `Bearer ${seller.token}`)
+        .send({ segment: 'MH', update_mode: 'update', rows }).expect(200);
+      const created = await listingRepo.findOneByOrFail({ company_id: seller.company.id });
+      createdListingIds.push(created.id);
+      expect(created).toMatchObject({ size_raw: '28x9-15', size_format: 'outer_diameter' });
+      expect(Number(created.size_outer_diameter)).toBe(28);
+    });
+
+    it('stores 1800R25 like 18.00R25, keeps the spelling, and a search for either finds both', async () => {
+      const seller = await makeActiveUser();
+      const buyer = await makeActiveUser({ country: 'PL' });
+      const dotless = await post(seller.token, { segment: 'OTR', size: '1800R25' });
+      const dotted = await post(seller.token, { segment: 'OTR', size: '18.00R25' });
+      const metric = await post(seller.token, { segment: 'OTR', size: '1050/50R32' });
+
+      const width = async (id: string) => Number((await listingRepo.findOneByOrFail({ id })).size_width);
+      expect(await width(dotless.id)).toBe(18);
+      expect(await width(dotted.id)).toBe(18);
+      expect(await width(metric.id)).toBe(1050); // slash sizes are mm, untouched
+      expect((await listingRepo.findOneByOrFail({ id: dotless.id })).size_raw).toBe('1800R25');
+
+      const both = [dotless.id, dotted.id].sort();
+      expect(await find(buyer.token, '1800R25')).toEqual(both);
+      expect(await find(buyer.token, '18.00R25')).toEqual(both);
+      expect(await find(buyer.token, '18.00 25')).toEqual(both);
+    });
+
+    it('migration 0012 converts dot-less widths stored before it, and back', async () => {
+      const seller = await makeActiveUser();
+      const l = await post(seller.token, { segment: 'OTR', size: '1400-24', additional_sizes: ['1400R24'] });
+      const ds = app.get(DataSource);
+      // Plain SQL: while 0012 is undone the entities name a missing column
+      const widths = async () => [
+        ...(await ds.query('SELECT size_width FROM listings WHERE id = $1', [l.id])),
+        ...(await ds.query('SELECT size_width FROM listing_sizes WHERE listing_id = $1 ORDER BY position', [l.id])),
+      ].map((r: { size_width: string }) => Number(r.size_width));
+
+      await ds.undoLastMigration(); // 0012 down: widths as written
+      expect(await widths()).toEqual([1400, 1400, 1400]);
+      await ds.runMigrations(); // 0012 up
+      expect(await widths()).toEqual([14, 14, 14]);
+    });
+  });
+
+  // ── 12. Rate limiting ─────────────────────────────────────────────────────
   // Runs last and in isolation: every prior test in this file authenticates
   // via signed JWTs (see makeActiveUser), never via POST /auth/login, so
   // nothing here has already spent part of the per-IP login quota.

@@ -13,6 +13,8 @@ export interface SizeSuggestion {
   aspect: number | null;
   construction: string;
   rim: number;
+  /** Outer diameter of an "x" size (28x9-15), else null */
+  diameter: number | null;
   count: number;
 }
 
@@ -21,7 +23,9 @@ export function usableCandidates(parsed: PartialSize): SizeCandidate[] {
 }
 
 // WHERE (candidate 1) OR (candidate 2) … — each candidate constrains only the
-// components it knows; an unknown component does not restrict.
+// components it knows; an unknown component does not restrict. An "x" query
+// (28x9-15) matches only "x" sizes with that diameter, any other query only
+// sizes without one: "9-15" is not 28x9-15.
 export function whereAnyCandidate(
   qb: WhereExpressionBuilder,
   alias: string,
@@ -33,6 +37,8 @@ export function whereAnyCandidate(
         or.orWhere(
           new Brackets((and) => {
             and.where(`${alias}.size_width = :sw${i}`, { [`sw${i}`]: c.width });
+            if (c.diameter !== undefined) and.andWhere(`${alias}.size_outer_diameter = :sd${i}`, { [`sd${i}`]: c.diameter });
+            else and.andWhere(`${alias}.size_outer_diameter IS NULL`);
             if (c.aspect !== undefined) and.andWhere(`${alias}.size_aspect_ratio = :sa${i}`, { [`sa${i}`]: c.aspect });
             if (c.construction) and.andWhere(`${alias}.size_construction = :sc${i}`, { [`sc${i}`]: c.construction });
             if (c.rim !== undefined) and.andWhere(`${alias}.size_rim = :sr${i}`, { [`sr${i}`]: c.rim });
@@ -44,10 +50,10 @@ export function whereAnyCandidate(
 }
 
 // Plain prefix of size_raw for LIKE — only the characters a size can contain,
-// with LIKE wildcards escaped anyway.
+// with LIKE wildcards escaped anyway. "x" sizes are stored with a lower-case x.
 export function sizeRawPrefix(normalisedQuery: string): string | null {
-  const compact = normalisedQuery.replace(/\s+/g, '');
-  if (!compact || !/^[0-9./\-RL]+$/.test(compact)) return null;
+  const compact = normalisedQuery.replace(/\s+/g, '').replace(/[X×]/g, 'x');
+  if (!compact || !/^[0-9./\-RLx]+$/.test(compact)) return null;
   return compact.replace(/[\\%_]/g, (ch) => `\\${ch}`) + '%';
 }
 
@@ -58,6 +64,7 @@ export function toSuggestion(row: Record<string, unknown>): SizeSuggestion {
     aspect: row.aspect === null || row.aspect === undefined ? null : Number(row.aspect),
     construction: String(row.construction),
     rim: Number(row.rim),
+    diameter: row.diameter === null || row.diameter === undefined ? null : Number(row.diameter),
     count: Number(row.count),
   };
 }

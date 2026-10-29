@@ -34,4 +34,8 @@ export class ListingSize {
 
   @Column({ type: 'numeric', precision: 5, scale: 1, name: 'size_rim' })
   size_rim: number;
+
+  // Outer diameter, inches — only "x" sizes (28x9-15)
+  @Column({ type: 'numeric', precision: 5, scale: 2, nullable: true, name: 'size_outer_diameter' })
+  size_outer_diameter: number | null;
 }

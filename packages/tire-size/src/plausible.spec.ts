@@ -20,8 +20,8 @@ describe('implausibleSize', () => {
     expect(implausibleSize(parseTireSize('5/5R5'))).toMatch(/profile 5/);
   });
 
-  it('reads a dot-less inch width only for inch formats', () => {
-    expect(implausibleSize(parseTireSize('1800R25'))).toBeNull();
+  it('a dot-less inch width is stored in inches, so the bounds see 18, not 1800', () => {
+    expect(parseTireSize('1800R25').size_width).toBe(18);
     expect(SIZE_BOUNDS.width.max).toBeLessThan(1800); // 1800 mm is not a width
   });
 });

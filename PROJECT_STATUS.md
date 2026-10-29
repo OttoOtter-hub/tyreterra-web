@@ -164,7 +164,7 @@ Smart import: one batch per committed file (company, user, segment, counts, `com
 8. `AddPasswordResetTokens` — password_reset_tokens table
 9. `AddListingSizes` (1750000000009) — listing_sizes; backfills position 0 from every listing
 10. `AddLoadIndexFieldsAndComment` (1750000000010) — parsed load index / speed / ply columns + comment; backfills by parsing existing `load_index`
-11. `AddImportBatchesAndMappings` (1750000000011) — import_batches, import_batch_items, import_mappings
+. `AddSizeOuterDiameter` (1750000000012) — `size_outer_diameter` on listings and listing_sizes; dot-less inch widths already stored (`1800R25` as 1800) re-read with the shared parser (→ 18); down restores the widths as written
 
 (Number 1750000000008 is reserved for the paused `feature/resend-email` branch.)
 
@@ -186,7 +186,7 @@ Smart import: one batch per committed file (company, user, segment, counts, `com
 
 One shared package used by both the API and the web (built by their `prebuild` scripts).
 
-**Strict parser** (`parseTireSize`, `src/strict.ts`) — used to store listings. Accepts 6 input formats, normalises to uppercase/no-spaces, extracts width/aspect/construction/rim:
+**Strict parser** (`parseTireSize`, `src/strict.ts`) — used to store listings. Accepts 7 input formats, normalises to uppercase/no-spaces, extracts width/aspect/construction/rim (and the outer diameter of "x" sizes):
 
 | Format | Example | `size_construction` |
 |---|---|---|
@@ -196,12 +196,16 @@ One shared package used by both the API and the web (built by their `prebuild` s
 | Radial inch | `14.9R28` | `R` |
 | Slash diagonal | `12.5/80-18` | `-` |
 | L-series diagonal | `19.5L-24` | `-` (L stripped for numeric width) |
+| Diameter x width ("x", "X", "×"; MH / ATV / LT) | `28x9-15`, `31x10.50R15` | `R` if written, else `-`; `size_outer_diameter` = 28; `size_raw` with a lower-case x |
+
+Inch widths written without the dot are stored in inches (`dotlessInchWidth`): `1800R25` = `18.00R25` (width 18), `750-16` = `7.50-16`, `1100R20` = `11.00R20`. Rule: digits only, quarter-inch steps, 200–6000 for diagonal, 400–6000 for radial (`175R14`, `205R16` stay old metric car sizes in mm); slash sizes (`1050/50R32`) are never touched. `size_raw` keeps the spelling the seller used. The partial parser applies the same rule, so a search for either spelling finds both.
 
 Size is editable after listing creation — `PATCH /listings/:id` re-parses if `size` is provided, recomputing all derived columns.
 
-**Partial parser** (`parsePartialSize`, `src/partial.ts`) — used for search and for hints while typing. Never throws; returns `{width?, aspect?, construction?, rim?, format, confidence, candidates[]}` (up to 5 readings, confidences sum to 1). Understands any case, spaces, comma decimals (`22,5`), separators `/ - x` and space, a missing `R` (construction then unconstrained), glued digits (`31580R225`, `38565225`: width 3–4 digits, aspect 25–95 step 5, rim 2 digits or 3 digits ending in 5 = x.5), and input that is still being typed (`315`, `315/`, `315/80R`). Ambiguous input returns several candidates instead of a silent guess; garbage returns none.
+**Partial parser** (`parsePartialSize`, `src/partial.ts`) — used for search and for hints while typing. Never throws; returns `{width?, aspect?, construction?, rim?, format, confidence, candidates[]}` (up to 5 readings, confidences sum to 1). Understands any case, spaces, comma decimals (`22,5`), separators `/ -` and space (`x` too, between metric numbers: `315x80R22.5`), "x" sizes (`28x9-15`, `28 x 9 - 15`, `28x9` while typing: diameter at most 2 digits), a missing `R` (construction then unconstrained), glued digits (`31580R225`, `38565225`: width 3–4 digits, aspect 25–95 step 5, rim 2 digits or 3 digits ending in 5 = x.5), and input that is still being typed (`315`, `315/`, `315/80R`). Ambiguous input returns several candidates instead of a silent guess; garbage returns none. Search: an "x" query matches only "x" sizes with that diameter (plus width, rim, and construction if R is given); any other query only sizes without a diameter, so `9-15` does not find `28x9-15`. Equivalents (`28x9-15` = `8.15-15`) are not linked.
 
-The strict parser checks spelling only; `implausibleSize` (`src/plausible.ts`) rejects numbers no tyre has (rim outside 4–63", width outside 2–60" and 100–1600 mm, profile outside 20–110). Listing create/update and the import both apply it, so `999/99R99` or a glued `31580R225` read literally is refused. The listing form shows a "Did you mean 315/80R22.5?" hint from the partial parser.
+
+The strict parser checks spelling only; `implausibleSize` (`src/plausible.ts`) rejects numbers no tyre has; all bounds are in `SIZE_BOUNDS` with their sources (rim 4–63", width 2–1600 (inch and mm overlap), profile 20–110; "x" sizes: diameter 8–80" and above the rim, width 2–60"). Listing create/update and the import both apply it, so `999/99R99` or a glued `31580R225` read literally is refused. The listing form shows a "Did you mean 315/80R22.5?" hint from the partial parser.
 
 **Load index** (`parseLoadIndex`, `src/load-index.ts`) — one parser for the form hint, the API and the import. Case and spaces ignored; `160K` → single 160 K; `160K/164J` → single + dual; `156/150L` → L for both; `173D/178A8`; `16PR`, `12 PR`, `PR16`, `16 ply` → ply; `16PR (132B)`, `132B 16PR` → ply + single. Unreadable text is kept, parsed fields null, with a warning.
 

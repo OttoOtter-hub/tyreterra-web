@@ -112,7 +112,7 @@ export interface CommitResult {
 
 // Listing columns an import may set, by import field. Fields left out of a
 // row keep the listing's current value on update.
-const SIZE_COLUMNS: (keyof Listing)[] = ['size_format', 'size_width', 'size_aspect_ratio', 'size_construction', 'size_rim', 'size_raw'];
+const SIZE_COLUMNS: (keyof Listing)[] = ['size_format', 'size_width', 'size_aspect_ratio', 'size_construction', 'size_rim', 'size_raw', 'size_outer_diameter'];
 const LOAD_COLUMNS: (keyof Listing)[] = ['load_index_single', 'speed_single', 'load_index_dual', 'speed_dual', 'ply_rating'];
 const REQUIRED_COLUMNS: (keyof Listing)[] = ['segment', 'brand', ...SIZE_COLUMNS, 'qty', 'condition', 'location_country'];
 const OPTIONAL_COLUMNS: Partial<Record<keyof ImportRowData, (keyof Listing)[]>> = {

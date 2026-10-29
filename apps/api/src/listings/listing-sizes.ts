@@ -37,6 +37,7 @@ export function parseListingSizes(main: string, additional: string[] = []): Pars
 export type SizeColumns = Pick<
   Listing,
   'size_format' | 'size_width' | 'size_aspect_ratio' | 'size_construction' | 'size_rim' | 'size_raw'
+  | 'size_outer_diameter'
 >;
 
 export function mainSizeColumns(p: ParsedTireSize): SizeColumns {
@@ -47,6 +48,7 @@ export function mainSizeColumns(p: ParsedTireSize): SizeColumns {
     size_construction: p.size_construction,
     size_rim: p.size_rim,
     size_raw: p.size_raw,
+    size_outer_diameter: p.size_outer_diameter ?? null,
   };
 }
 

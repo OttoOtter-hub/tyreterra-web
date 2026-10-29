@@ -58,6 +58,8 @@ export interface CatalogueItem {
   size_aspect_ratio: number | null;
   size_construction: string;
   size_rim: number;
+  /** Outer diameter of an "x" size (28x9-15), else null */
+  size_outer_diameter: number | null;
   size_format: string;
   /** Sizes besides the main one (size_raw) */
   additional_sizes: string[];
@@ -337,11 +339,13 @@ export class ListingsService {
       .addSelect('ls.size_aspect_ratio', 'aspect')
       .addSelect('ls.size_construction', 'construction')
       .addSelect('ls.size_rim', 'rim')
+      .addSelect('ls.size_outer_diameter', 'diameter')
       .addSelect('COUNT(DISTINCT l.id)', 'count')
       .groupBy('ls.size_width')
       .addGroupBy('ls.size_aspect_ratio')
       .addGroupBy('ls.size_construction')
-      .addGroupBy('ls.size_rim');
+      .addGroupBy('ls.size_rim')
+      .addGroupBy('ls.size_outer_diameter');
   }
 
   // Active, not deleted, not expired listings the viewer may see. Joins the
@@ -573,6 +577,7 @@ export class ListingsService {
       size_construction: l.size_construction,
       size_rim: l.size_rim,
       size_format: l.size_format,
+      size_outer_diameter: l.size_outer_diameter,
       additional_sizes: additionalSizesOf(l.sizes),
       matched_size: null,
       tire_type: l.tire_type,

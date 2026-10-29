@@ -61,7 +61,8 @@ export function resolveSize(input: string, segment?: Segment): ResolvedSize | nu
     .replace(/,/g, '.')
     .replace(/\s+/g, '')
     .replace(/^(?:LT|ST|P)(?=\d)/, '')
-    .replace(/ZR/, 'R');
+    .replace(/ZR/, 'R')
+    .replace(/[×*]/g, 'X');
   if (!norm) return null;
 
   let strict: ParsedTireSize | null = null;
@@ -107,10 +108,10 @@ export function resolveSize(input: string, segment?: Segment): ResolvedSize | nu
 // Size formats usual for each segment; others get a warning, never an error
 const SEGMENT_FORMATS: Record<Segment, TireSizeFormat[]> = {
   TBR: ['metric', 'radial_inch', 'diagonal_inch'],
-  PCR: ['metric'],
+  PCR: ['metric', 'outer_diameter'],
   OTR: ['metric', 'flotation', 'radial_inch', 'diagonal_inch', 'slash_diagonal'],
-  AGRI: ['metric', 'flotation', 'radial_inch', 'diagonal_inch', 'slash_diagonal'],
-  MH: ['diagonal_inch', 'slash_diagonal', 'metric'],
+  AGRI: ['metric', 'flotation', 'radial_inch', 'diagonal_inch', 'slash_diagonal', 'outer_diameter'],
+  MH: ['diagonal_inch', 'slash_diagonal', 'metric', 'outer_diameter'],
 };
 const TRUCK_RIMS = [17.5, 19.5, 22.5, 24.5];
 
@@ -290,8 +291,8 @@ export interface GluedCell {
 const SIZE_RES: { re: RegExp; supported: boolean }[] = [
   // 315/80R22.5, 315/80 R 22,5, LT215/85R16, 12.5/80-18, 315/80 22.5
   { re: /(?<![\w./])(?:LT|ST|P)?\d{2,3}(?:[.,]\d{1,2})?\s?\/\s?\d{2,3}(?:[.,]\d)?(?:\s*(?:Z?R|-)\s*|\s+)\d{2}(?:[.,]\d)?(?![\w/]|[.,]\d)/g, supported: true },
-  // 31x10.50R15, 28x9-15, 18x7-8 (flotation / industrial "x" sizes)
-  { re: /(?<![\w./])\d{2}(?:[.,]\d)?\s?[X×*]\s?\d{1,2}(?:[.,]\d{1,2})?\s?(?:R|-)?\s?\d{1,2}(?![\w/]|[.,]\d)/g, supported: false },
+  // 31x10.50R15, 28x9-15, 18x7-8, 27x10-12 (outer diameter x width: MH / ATV / LT)
+  { re: /(?<![\w./])\d{1,2}(?:[.,]\d{1,2})?\s?[X×*]\s?\d{1,2}(?:[.,]\d{1,2})?\s?(?:R|-)?\s?\d{1,2}(?![\w/]|[.,]\d)/g, supported: true },
   // glued metric: 31580R225, 38565R22.5
   { re: /(?<![\w./])\d{5}\s?(?:Z?R|-)\s?\d{2,3}(?:[.,]\d)?(?![\w/]|[.,]\d)/g, supported: true },
   // inch: 11R22.5, 12.00R20, 10.00-20, 16.9-28, 17.5L-24, 23.5R25, 1100R20

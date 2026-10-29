@@ -83,6 +83,12 @@ export default function TireSizeInput({ value, onChange, error }: Props) {
               <span className="size-preview-label">Format</span>
               <span className="size-preview-value">{FORMAT_LABELS[parsed.format]}</span>
             </div>
+            {parsed.size_outer_diameter !== undefined && (
+              <div className="size-preview-field">
+                <span className="size-preview-label">Outer diameter</span>
+                <span className="size-preview-value">{parsed.size_outer_diameter}"</span>
+              </div>
+            )}
             <div className="size-preview-field">
               <span className="size-preview-label">Width</span>
               <span className="size-preview-value">{parsed.size_width}</span>

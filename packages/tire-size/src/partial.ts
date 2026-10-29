@@ -7,6 +7,8 @@
 //   12.5/80-18 · 10.00-20 · 750-16 · 14.9R28 · 11R22.5 · 19.5L-24 · 1100R20
 
 import type { TireSizeFormat } from './strict';
+import { dotlessInchWidth } from './strict';
+import { SIZE_BOUNDS } from './plausible';
 
 export type Construction = 'R' | '-';
 
@@ -15,6 +17,8 @@ export type Construction = 'R' | '-';
 export type PartialFormat = TireSizeFormat | 'inch' | 'partial';
 
 export interface SizeCandidate {
+  /** Outer diameter, inches — only for "x" sizes (28x9-15) */
+  diameter?: number;
   width?: number;
   aspect?: number;
   construction?: Construction;
@@ -29,6 +33,7 @@ export interface SizeCandidate {
 }
 
 export interface PartialSize {
+  diameter?: number;
   width?: number;
   aspect?: number;
   construction?: Construction;
@@ -313,7 +318,9 @@ function interpret(r: Reading, trailing: Sep | undefined): SizeCandidate | null 
   let width = w.value;
   let widthText = w.text;
   const metric = isMetricWidth(width);
-  if (!metric && !isInchWidth(width)) return null;
+  // "1800R25", "4000R57": too wide for mm, a dot-less inch width
+  const wideDotless = !metric && !a && !!rm && dotlessInchWidth(w.text, construction) !== null;
+  if (!metric && !isInchWidth(width) && !wideDotless) return null;
 
   if (a) {
     if (!isAspect(a.value, a.glued)) return null;
@@ -325,10 +332,12 @@ function interpret(r: Reading, trailing: Sep | undefined): SizeCandidate | null 
   if (rm && !isRim(rm.value)) return null;
   if (lSeries && metric) return null;
 
-  // "1100R20", "750-16": an inch width written without its decimal point
-  if (metric && !a && rm) {
-    const inch = width / 100;
-    if (width % 25 !== 0 || !isInchWidth(inch) || inch > 30) return null;
+  // "1100R20", "750-16", "1800R25": an inch width written without its
+  // decimal point; the same rule as the strict parser, so a stored size and
+  // a query read alike
+  if ((metric || wideDotless) && !a && rm) {
+    const inch = dotlessInchWidth(w.text, construction);
+    if (inch === null || !isInchWidth(inch)) return null;
     width = inch;
     widthText = inch.toFixed(2);
     weight *= 0.85;
@@ -371,6 +380,56 @@ function makeLabel(
   return `${s}${c}${shown}`;
 }
 
+// ── "x" sizes ─────────────────────────────────────────────────────────────
+
+// DIAMETER x WIDTH (R|-|space) RIM, complete or still being typed:
+// "28x9-15", "28 X 9 - 15", "31×10.50R15", "27x10-12", "28x9", "28x".
+// A diameter has at most two digits, so "315x80R22.5" (x as a separator)
+// still goes the usual way.
+const X_SIZE = /^(\d{1,2}(?:\.\d{1,2})?) ?[X×] ?(?:(\d{1,2}(?:\.\d{1,2})?)(?: ?(R|-) ?(\d{1,2}(?:\.\d)?)?| (\d{1,2}(?:\.\d)?))?)?$/;
+
+/** The reading of an "x" query; undefined when the query is not one */
+function parseOuterDiameter(input: string): PartialSize | undefined {
+  const m = X_SIZE.exec(input);
+  if (!m) return undefined;
+  const [, dText, wText, sep, rimAfterSep, rimAfterSpace] = m;
+  const diameter = Number(dText);
+  const width = wText !== undefined ? Number(wText) : undefined;
+  const rimText = rimAfterSep ?? rimAfterSpace;
+  const rim = rimText !== undefined ? Number(rimText) : undefined;
+  const construction = sep === 'R' ? 'R' : sep === '-' ? '-' : undefined;
+
+  const ok = (v: number | undefined, r: { min: number; max: number }) => v === undefined || (v >= r.min && v <= r.max);
+  if (!ok(diameter, SIZE_BOUNDS.outerDiameter) || !ok(width, SIZE_BOUNDS.outerDiameterWidth) || !ok(rim, SIZE_BOUNDS.rim)) {
+    return { ...EMPTY, candidates: [] };
+  }
+  if (rim !== undefined && diameter <= rim) return { ...EMPTY, candidates: [] };
+
+  const c = construction ?? (rim !== undefined ? ' ' : '');
+  const label = width === undefined
+    ? `${dText}x…`
+    : rimText === undefined ? `${dText}x${wText}${c}…` : `${dText}x${wText}${c}${rimText}`;
+  const candidate: SizeCandidate = {
+    diameter,
+    ...(width !== undefined && { width }),
+    ...(construction && { construction }),
+    ...(rim !== undefined && { rim }),
+    format: rim !== undefined ? 'outer_diameter' : 'partial',
+    confidence: 1,
+    complete: rim !== undefined && width !== undefined,
+    label,
+  };
+  return {
+    diameter,
+    ...(width !== undefined && { width }),
+    ...(construction && { construction }),
+    ...(rim !== undefined && { rim }),
+    format: candidate.format,
+    confidence: 1,
+    candidates: [candidate],
+  };
+}
+
 // ── Public API ────────────────────────────────────────────────────────────
 
 /** Uppercase, comma → dot, trimmed, inner whitespace collapsed. */
@@ -382,6 +441,9 @@ export function parsePartialSize(q: string | null | undefined): PartialSize {
   if (typeof q !== 'string') return { ...EMPTY, candidates: [] };
   const input = normaliseSizeQuery(q);
   if (!input || input.length > MAX_INPUT_LENGTH) return { ...EMPTY, candidates: [] };
+
+  const x = parseOuterDiameter(input);
+  if (x !== undefined) return x;
 
   const lexed = lex(input);
   if (!lexed) return { ...EMPTY, candidates: [] };

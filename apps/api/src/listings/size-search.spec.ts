@@ -32,7 +32,7 @@ describe('size-search helpers', () => {
       size: '315/80R22.5', width: '315.00', aspect: '80.0', construction: 'R', rim: '22.5', count: '3',
       price_internal_encrypted: 'x', company_id: 'y', id: 'z',
     });
-    expect(s).toEqual({ size: '315/80R22.5', width: 315, aspect: 80, construction: 'R', rim: 22.5, count: 3 });
+    expect(s).toEqual({ size: '315/80R22.5', width: 315, aspect: 80, construction: 'R', rim: 22.5, diameter: null, count: 3 });
     expect(toSuggestion({ size: '10.00-20', width: '10', aspect: null, construction: '-', rim: '20', count: '1' }).aspect)
       .toBeNull();
   });
