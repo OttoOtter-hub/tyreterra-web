@@ -56,7 +56,7 @@ Manual, no CI/CD, no Docker — see [DEPLOYMENT.md](DEPLOYMENT.md) for the step-
 | `ratings/` | Seller rating, recalculated from deal history (nightly cron at 02:00 + on demand) |
 | `vat/` | EU VIES VAT number validation |
 | `audit/` | Append-only audit log (every state-changing action writes here) |
-| `common/` | `EncryptionService` (AES-256-GCM), tire size parser, email service (stub) |
+| `common/` | `EncryptionService` (AES-256-GCM), email service (stub); the tire size parser is in `packages/tire-size` (§5) |
 
 ### Auth & roles
 - JWT bearer auth (`JwtAuthGuard`), `AdminGuard` for `/admin/*`.
@@ -169,9 +169,11 @@ Rating score/interaction_count per company; `audit_log` records `event_type`, `a
 | MH | `pneumatic`, `solid` |
 | OTR, AGRI | none |
 
-## 5. Tire size parser (`common/tire-size.parser.ts`)
+## 5. Tire size parser (`packages/tire-size`, `@tyreterra/tire-size`)
 
-Accepts 6 input formats, normalises to uppercase/no-spaces, extracts width/aspect/construction/rim:
+One shared package used by both the API and the web (built by their `prebuild` scripts).
+
+**Strict parser** (`parseTireSize`, `src/strict.ts`) — used to store listings. Accepts 6 input formats, normalises to uppercase/no-spaces, extracts width/aspect/construction/rim:
 
 | Format | Example | `size_construction` |
 |---|---|---|
@@ -183,6 +185,10 @@ Accepts 6 input formats, normalises to uppercase/no-spaces, extracts width/aspec
 | L-series diagonal | `19.5L-24` | `-` (L stripped for numeric width) |
 
 Size is editable after listing creation — `PATCH /listings/:id` re-parses if `size` is provided, recomputing all derived columns.
+
+**Partial parser** (`parsePartialSize`, `src/partial.ts`) — used for search and for hints while typing. Never throws; returns `{width?, aspect?, construction?, rim?, format, confidence, candidates[]}` (up to 5 readings, confidences sum to 1). Understands any case, spaces, comma decimals (`22,5`), separators `/ - x` and space, a missing `R` (construction then unconstrained), glued digits (`31580R225`, `38565225`: width 3–4 digits, aspect 25–95 step 5, rim 2 digits or 3 digits ending in 5 = x.5), and input that is still being typed (`315`, `315/`, `315/80R`). Ambiguous input returns several candidates instead of a silent guess; garbage returns none.
+
+Known quirk of the strict parser (unchanged): it accepts glued nonsense such as `31580R225` as a radial inch size (width 31580, rim 225"). The listing form shows a "Did you mean 315/80R22.5?" hint from the partial parser in that case.
 
 ---
 
@@ -203,7 +209,11 @@ All routes prefixed `/api`. JWT bearer required unless noted.
 - `GET /export` — Excel download of own listings
 - `GET /import/template` — Excel template download
 - `POST /import` — bulk-create from uploaded `.xlsx`; **aborts entirely on first row error**, returns row number + message
-- `GET /?segment=&tire_type=&brand=&size_raw=&location_country=&condition=&qty_min=&min_rating=&page=&limit=` — catalogue search (active, non-deleted, non-expired listings the viewer may see, no price)
+- `GET /?segment=&tire_type=&brand=&q=&size_raw=&location_country=&condition=&qty_min=&min_rating=&page=&limit=` — catalogue search (active, non-deleted, non-expired listings visible to the viewer; no price)
+  - `q` — free-form size, parsed with `parsePartialSize`; matches by components (width/aspect/construction/rim), unspecified components don't constrain, ambiguous readings are OR'ed. When nothing matches, the response has `nearest`: up to 5 sizes with the same width and rim (and construction, if given) and the closest profiles. Unreadable `q` → empty result.
+  - `size_raw` — legacy (old links); unchanged: width + rim + construction, ignores aspect, no `nearest`. `q` wins when both are given.
+  - Visibility: the rule in `listing-visibility.ts` (below), the same for search, suggestions and nearest sizes.
+- `GET /size-suggest?q=` — up to 10 sizes on offer matching `q` (same visibility rules), each `{size, width, aspect, construction, rim, count}` — no prices, companies or listing ids. 5 s cache per company + query, 60 requests / 10 s per IP, 401 without JWT.
 - `GET /:id` — single listing; owner gets decrypted `price`/`currency` and the company, everyone else `seller_country` only (never the company name, VAT or contacts)
 
 **Visibility** (`listings/listing-visibility.ts`, one rule for the catalogue, `GET /:id`, owner actions and `POST /requests`): deleted — nobody; owner and admins — always; others — status active and not expired, `allowed_roles` is `all` or the viewer role, not `exclude_own_region` with the viewer company in the seller country, and the viewer company country in `visible_regions` when that is set. A listing the viewer may not see is **404**, never 403; 403 only for a visible listing that is not theirs. Existing requests, offers and deals stay readable for both parties after a listing is hidden.

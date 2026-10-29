@@ -545,7 +545,121 @@ describe('Critical paths (e2e)', () => {
     });
   });
 
-  // ── 7. Rate limiting ──────────────────────────────────────────────────────
+  // ── 7. Size search and suggestions ───────────────────────────────────────
+  // Uses unusual 455/xxR22.5 sizes so other tests' listings do not interfere.
+  describe('Size search and suggestions', () => {
+    const SUGGESTION_KEYS = ['aspect', 'construction', 'count', 'rim', 'size', 'width'];
+
+    async function createListing(token: string, extra: Record<string, unknown>) {
+      const res = await request(httpServer)
+        .post('/api/listings')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ ...baseListing, ...extra })
+        .expect(201);
+      createdListingIds.push(res.body.id);
+      return res.body.id as string;
+    }
+
+    function suggest(token: string, q: string) {
+      return request(httpServer)
+        .get('/api/listings/size-suggest')
+        .query({ q })
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+    }
+
+    const sizes = (body: { size: string }[]) => body.map((s) => s.size);
+
+    it('requires a valid JWT', async () => {
+      await request(httpServer).get('/api/listings/size-suggest').query({ q: '455' }).expect(401);
+      await request(httpServer)
+        .get('/api/listings/size-suggest')
+        .query({ q: '455' })
+        .set('Authorization', 'Bearer not-a-jwt')
+        .expect(401);
+    });
+
+    it('returns sizes and counts only — no prices, companies or listing ids', async () => {
+      const seller = await makeActiveUser({ country: 'DE' });
+      const buyer = await makeActiveUser({ country: 'PL' });
+      const id = await createListing(seller.token, { size: '455/40R22.5', price: 777.77, currency: 'EUR' });
+
+      const res = await suggest(buyer.token, '45540');
+      expect(sizes(res.body)).toContain('455/40R22.5');
+      for (const s of res.body) expect(Object.keys(s).sort()).toEqual(SUGGESTION_KEYS);
+
+      const body = JSON.stringify(res.body);
+      expect(body).not.toContain('777.77');
+      expect(body).not.toContain(id);
+      expect(body).not.toContain(seller.company.id);
+      expect(body).not.toContain(seller.company.name);
+    });
+
+    it("does not show another company's listing hidden from the viewer's country", async () => {
+      const seller = await makeActiveUser({ country: 'DE' });
+      const buyerSameCountry = await makeActiveUser({ country: 'DE' });
+      const buyerAbroad = await makeActiveUser({ country: 'PL' });
+      await createListing(seller.token, { size: '455/50R22.5', exclude_own_region: true });
+
+      expect(sizes((await suggest(buyerSameCountry.token, '455/50')).body)).not.toContain('455/50R22.5');
+      expect(sizes((await suggest(buyerAbroad.token, '455/50')).body)).toContain('455/50R22.5');
+      expect(sizes((await suggest(seller.token, '455/50')).body)).toContain('455/50R22.5'); // own listing
+
+      const search = await request(httpServer)
+        .get('/api/listings')
+        .query({ q: '455/50R22.5' })
+        .set('Authorization', `Bearer ${buyerSameCountry.token}`)
+        .expect(200);
+      expect(search.body.total).toBe(0);
+    });
+
+    it('does not suggest sizes of deleted listings', async () => {
+      const seller = await makeActiveUser({ country: 'DE' });
+      const buyer = await makeActiveUser({ country: 'PL' });
+      const id = await createListing(seller.token, { size: '455/55R22.5' });
+      await request(httpServer)
+        .delete(`/api/listings/${id}`)
+        .set('Authorization', `Bearer ${seller.token}`)
+        .expect(200);
+
+      expect(sizes((await suggest(buyer.token, '455/55R')).body)).not.toContain('455/55R22.5');
+    });
+
+    it('searches q by components, keeps size_raw working, and offers nearest sizes when empty', async () => {
+      const seller = await makeActiveUser({ country: 'DE' });
+      const buyer = await makeActiveUser({ country: 'PL' });
+      const id = await createListing(seller.token, { size: '455/40R22.5' });
+
+      for (const q of ['45540R225', '455 40 22,5', '455/40r22.5']) {
+        const res = await request(httpServer)
+          .get('/api/listings')
+          .query({ q })
+          .set('Authorization', `Bearer ${buyer.token}`)
+          .expect(200);
+        expect(res.body.data.map((l: { id: string }) => l.id)).toContain(id);
+      }
+
+      const legacy = await request(httpServer)
+        .get('/api/listings')
+        .query({ size_raw: '455/40R22.5' })
+        .set('Authorization', `Bearer ${buyer.token}`)
+        .expect(200);
+      expect(legacy.body.data.map((l: { id: string }) => l.id)).toContain(id);
+      expect(legacy.body.nearest).toBeUndefined();
+
+      const empty = await request(httpServer)
+        .get('/api/listings')
+        .query({ q: '455/45R22.5' })
+        .set('Authorization', `Bearer ${buyer.token}`)
+        .expect(200);
+      expect(empty.body.total).toBe(0);
+      expect(empty.body.data).toEqual([]);
+      expect(sizes(empty.body.nearest)).toContain('455/40R22.5');
+      for (const s of empty.body.nearest) expect(Object.keys(s).sort()).toEqual(SUGGESTION_KEYS);
+    });
+  });
+
+  // ── 8. Rate limiting ──────────────────────────────────────────────────────
   // Runs last and in isolation: every prior test in this file authenticates
   // via signed JWTs (see makeActiveUser), never via POST /auth/login, so
   // nothing here has already spent part of the per-IP login quota.

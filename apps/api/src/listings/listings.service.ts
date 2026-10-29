@@ -5,20 +5,37 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { Repository, IsNull, Brackets, SelectQueryBuilder } from 'typeorm';
 import { Listing, ListingStatus, AllowedRoles } from './entities/listing.entity';
 import { User, UserRole } from '../auth/entities/user.entity';
-import { parseTireSize, TireSizeParseError } from '../common/tire-size.parser';
+import { Company } from '../companies/entities/company.entity';
+import {
+  parseTireSize,
+  TireSizeParseError,
+  parsePartialSize,
+  normaliseSizeQuery,
+  SizeCandidate,
+} from '@tyreterra/tire-size';
+import {
+  SizeSuggestion,
+  sizeRawPrefix,
+  toSuggestion,
+  usableCandidates,
+  whereAnyCandidate,
+} from './size-search';
 import { EncryptionService } from '../common/encryption.service';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { CreateListingDto } from './dto/create-listing.dto';
 import { UpdateListingDto } from './dto/update-listing.dto';
 import { SearchListingDto } from './dto/search-listing.dto';
-import { Company } from '../companies/entities/company.entity';
 import { canSeeListing, isOwner, whereListingVisibleTo } from './listing-visibility';
 import { serializeListing, SerializedListing } from '../common/serializers';
 
 const LISTING_TTL_DAYS = 30;
+const SUGGEST_LIMIT = 10;
+const NEAREST_LIMIT = 5;
+const SUGGEST_CACHE_MS = 5_000;
+const SUGGEST_CACHE_MAX = 500;
 
 // Shape returned by the catalogue/search endpoint (§6.1 + §6.2)
 export interface CatalogueItem {
@@ -84,6 +101,8 @@ export class ListingsService {
     if (!isOwner(listing, user) && !(allowAdmin && user.role === UserRole.ADMIN)) throw new ForbiddenException();
     return listing;
   }
+
+  private readonly suggestCache = new Map<string, { value: SizeSuggestion[]; expires: number }>();
 
   async create(dto: CreateListingDto, user: User): Promise<SerializedListing> {
     if (!user.company_id) {
@@ -156,38 +175,35 @@ export class ListingsService {
     return listings.map(l => serializeListing(l, user, this.encryption));
   }
 
-  async search(dto: SearchListingDto, viewer: User): Promise<{ data: CatalogueItem[]; total: number }> {
+  async search(
+    dto: SearchListingDto,
+    viewer: User,
+  ): Promise<{ data: CatalogueItem[]; total: number; nearest?: SizeSuggestion[] }> {
     const page = dto.page ?? 1;
     const limit = Math.min(dto.limit ?? 20, 100);
 
-    const qb = this.listingRepo
-      .createQueryBuilder('l')
-      .leftJoin('l.company', 'c')
-      .leftJoin('c.rating', 'r')
-      // §6.1: include seller country and rating; §6.2: never expose company name
-      .addSelect(['c.country', 'r.score', 'r.interaction_count'])
-      // The viewer's company (NULL without one), for the region rules
-      .leftJoin(Company, 'vc', 'vc.id = :viewerCompanyId', { viewerCompanyId: viewer.company_id ?? null })
-      .where('l.status = :status', { status: ListingStatus.ACTIVE })
-      .andWhere('l.deleted_at IS NULL')
-      .andWhere('l.expires_at > NOW()');
-    whereListingVisibleTo(qb, 'l', 'c', 'vc', viewer);
+    // §6.1: include seller country and rating; §6.2: never expose company name
+    const qb = this.visibleListings(viewer).addSelect(['c.country', 'r.score', 'r.interaction_count']);
+    this.applyFilters(qb, dto);
 
-    if (dto.segment) qb.andWhere('l.segment = :segment', { segment: dto.segment });
-    if (dto.tire_type) qb.andWhere('l.tire_type = :tire_type', { tire_type: dto.tire_type });
-    if (dto.brand) qb.andWhere('LOWER(l.brand) = LOWER(:brand)', { brand: dto.brand });
-    if (dto.condition) qb.andWhere('l.condition = :condition', { condition: dto.condition });
-    if (dto.location_country) {
-      qb.andWhere('l.location_country = :country', { country: dto.location_country.toUpperCase() });
-    }
-    if (dto.qty_min) qb.andWhere('l.qty >= :qty_min', { qty_min: dto.qty_min });
+    // Free-text size query (`q`): parsed into components and every plausible
+    // reading searched, so an ambiguous query never silently picks one
+    if (dto.q !== undefined && dto.q.trim() !== '') {
+      const candidates = usableCandidates(parsePartialSize(dto.q));
+      if (!candidates.length) return { data: [], total: 0, nearest: [] };
+      whereAnyCandidate(qb, 'l', candidates);
 
-    // §6.3: minimum seller rating — null score (new members) excluded when filter is set
-    if (dto.min_rating) {
-      qb.andWhere('r.score >= :min_rating', { min_rating: dto.min_rating });
+      const [rows, total] = await qb
+        .orderBy('l.created_at', 'DESC')
+        .skip((page - 1) * limit)
+        .take(limit)
+        .getManyAndCount();
+      const nearest = total === 0 ? await this.nearestSizes(candidates, dto, viewer) : [];
+      return { data: rows.map((r) => this.toCatalogueItem(r)), total, nearest };
     }
 
-    // Size search on parsed components (§4.4) — prefer structured, fall back to raw
+    // Legacy size search (§4.4), kept for old clients and links: size_raw
+    // matches width + rim + construction; or structured components
     if (dto.size_raw) {
       try {
         const p = parseTireSize(dto.size_raw);
@@ -210,6 +226,116 @@ export class ListingsService {
       .getManyAndCount();
 
     return { data: rows.map((r) => this.toCatalogueItem(r)), total };
+  }
+
+  // Up to 10 sizes matching a partial size query, from listings the viewer
+  // can see, with how many listings each has. Sizes only: no listing ids,
+  // prices or companies. Cached briefly per viewer company and query.
+  async suggestSizes(q: string | undefined, viewer: User): Promise<SizeSuggestion[]> {
+    const norm = normaliseSizeQuery(q ?? '');
+    if (!norm) return [];
+    const key = `${viewer.company_id ?? '-'}|${norm}`;
+    const cached = this.suggestCache.get(key);
+    if (cached && cached.expires > Date.now()) return cached.value;
+
+    const candidates = usableCandidates(parsePartialSize(norm));
+    const prefix = sizeRawPrefix(norm);
+    let value: SizeSuggestion[] = [];
+    if (candidates.length || prefix) {
+      const qb = this.sizeGroups(viewer);
+      qb.andWhere(
+        new Brackets((or) => {
+          if (prefix) or.orWhere(`l.size_raw LIKE :prefix ESCAPE '\\'`, { prefix });
+          if (candidates.length) or.orWhere(new Brackets((sub) => whereAnyCandidate(sub, 'l', candidates)));
+        }),
+      );
+      // Exact text prefix first, then the most offered sizes
+      if (prefix) qb.orderBy(`MAX(CASE WHEN l.size_raw LIKE :prefix ESCAPE '\\' THEN 1 ELSE 0 END)`, 'DESC');
+      const rows = await qb
+        .addOrderBy('COUNT(*)', 'DESC')
+        .addOrderBy('MIN(l.size_raw)', 'ASC')
+        .limit(SUGGEST_LIMIT)
+        .getRawMany<Record<string, unknown>>();
+      value = rows.map(toSuggestion);
+    }
+
+    if (this.suggestCache.size >= SUGGEST_CACHE_MAX) {
+      this.suggestCache.delete(this.suggestCache.keys().next().value as string);
+    }
+    this.suggestCache.set(key, { value, expires: Date.now() + SUGGEST_CACHE_MS });
+    return value;
+  }
+
+  // For an empty result: up to 5 sizes with the same width and rim (and
+  // construction, if given) but another profile, closest profile first.
+  private async nearestSizes(
+    candidates: SizeCandidate[],
+    dto: SearchListingDto,
+    viewer: User,
+  ): Promise<SizeSuggestion[]> {
+    const target = candidates.find((c) => c.aspect !== undefined && c.rim !== undefined);
+    if (!target) return [];
+
+    const qb = this.sizeGroups(viewer)
+      .andWhere('l.size_width = :nw AND l.size_rim = :nr', { nw: target.width, nr: target.rim })
+      .andWhere('l.size_aspect_ratio IS NOT NULL AND l.size_aspect_ratio <> :na', { na: target.aspect });
+    if (target.construction) qb.andWhere('l.size_construction = :nc', { nc: target.construction });
+    this.applyFilters(qb, dto);
+
+    const rows = await qb
+      .orderBy('ABS(l.size_aspect_ratio - :na)', 'ASC')
+      .addOrderBy('COUNT(*)', 'DESC')
+      .limit(NEAREST_LIMIT)
+      .getRawMany<Record<string, unknown>>();
+    return rows.map(toSuggestion);
+  }
+
+  // Visible listings grouped by size, selecting only size columns and a count
+  private sizeGroups(viewer: User): SelectQueryBuilder<Listing> {
+    return this.visibleListings(viewer)
+      .select('MIN(l.size_raw)', 'size')
+      .addSelect('l.size_width', 'width')
+      .addSelect('l.size_aspect_ratio', 'aspect')
+      .addSelect('l.size_construction', 'construction')
+      .addSelect('l.size_rim', 'rim')
+      .addSelect('COUNT(*)', 'count')
+      .groupBy('l.size_width')
+      .addGroupBy('l.size_aspect_ratio')
+      .addGroupBy('l.size_construction')
+      .addGroupBy('l.size_rim');
+  }
+
+  // Active, not deleted, not expired listings the viewer may see. Joins the
+  // seller company as `c`, its rating as `r` and the viewer's company as `vc`.
+  private visibleListings(viewer: User): SelectQueryBuilder<Listing> {
+    const viewerCompanyId = viewer.company_id ?? null;
+    const qb = this.listingRepo
+      .createQueryBuilder('l')
+      .leftJoin('l.company', 'c')
+      .leftJoin('c.rating', 'r')
+      .leftJoin(Company, 'vc', 'vc.id = :viewerCompanyId', { viewerCompanyId })
+      .where('l.status = :status', { status: ListingStatus.ACTIVE })
+      .andWhere('l.deleted_at IS NULL')
+      .andWhere('l.expires_at > NOW()');
+    whereListingVisibleTo(qb, 'l', 'c', 'vc', viewer);
+    return qb;
+  }
+
+  // Catalogue filters other than size
+  private applyFilters(qb: SelectQueryBuilder<Listing>, dto: SearchListingDto): void {
+    if (dto.segment) qb.andWhere('l.segment = :segment', { segment: dto.segment });
+    if (dto.tire_type) qb.andWhere('l.tire_type = :tire_type', { tire_type: dto.tire_type });
+    if (dto.brand) qb.andWhere('LOWER(l.brand) = LOWER(:brand)', { brand: dto.brand });
+    if (dto.condition) qb.andWhere('l.condition = :condition', { condition: dto.condition });
+    if (dto.location_country) {
+      qb.andWhere('l.location_country = :country', { country: dto.location_country.toUpperCase() });
+    }
+    if (dto.qty_min) qb.andWhere('l.qty >= :qty_min', { qty_min: dto.qty_min });
+
+    // §6.3: minimum seller rating — null score (new members) excluded when filter is set
+    if (dto.min_rating) {
+      qb.andWhere('r.score >= :min_rating', { min_rating: dto.min_rating });
+    }
   }
 
   async findOne(id: string, viewer: User): Promise<SerializedListing | Omit<SerializedListing, 'company'> & { seller_country: string | null }> {

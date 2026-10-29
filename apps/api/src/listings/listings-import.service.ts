@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 import * as ExcelJS from 'exceljs';
 import { Listing, ListingStatus, TireSegment, TireCondition, AllowedRoles } from './entities/listing.entity';
 import { User } from '../auth/entities/user.entity';
-import { parseTireSize, TireSizeParseError } from '../common/tire-size.parser';
+import { parseTireSize, TireSizeParseError } from '@tyreterra/tire-size';
 
 const VALID_SEGMENTS = Object.values(TireSegment) as string[];
 const VALID_CONDITIONS = Object.values(TireCondition) as string[];

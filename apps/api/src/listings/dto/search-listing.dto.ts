@@ -1,4 +1,4 @@
-import { IsEnum, IsOptional, IsString, IsInt, IsNumber, Min, Length } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsInt, IsNumber, Min, Length, MaxLength } from 'class-validator';
 import { Type } from 'class-transformer';
 import { TireSegment, TireCondition } from '../entities/listing.entity';
 
@@ -10,6 +10,13 @@ export class SearchListingDto {
   @IsOptional()
   @IsString()
   brand?: string;
+
+  // Free-text size query ("315/80R22.5", "315 80 22,5", "31580R225", "315/80R"),
+  // parsed with parsePartialSize. Takes precedence over the size_* params below.
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
 
   // Structured size search — individual components
   @IsOptional()
@@ -68,4 +75,11 @@ export class SearchListingDto {
   @Min(1)
   @Type(() => Number)
   min_rating?: number;
+}
+
+export class SizeSuggestDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  q?: string;
 }
