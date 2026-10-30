@@ -48,6 +48,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = () => {
+    // Best effort: the local sign-out must not depend on the network
+    api.post('/auth/refresh/logout').catch(() => {});
     localStorage.removeItem('tt_token');
     setUser(null);
   };

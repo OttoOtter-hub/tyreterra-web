@@ -9,6 +9,7 @@ export interface JwtPayload {
   sub: string;
   email: string;
   role: string;
+  tv?: number; // users.token_version at issue time
 }
 
 @Injectable()
@@ -25,10 +26,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
   }
 
   async validate(payload: JwtPayload): Promise<User> {
-    const user = await this.userRepo.findOneBy({ id: payload.sub });
-    if (!user || user.status === UserStatus.BLOCKED) {
+    const user = await this.userRepo
+      .createQueryBuilder('u')
+      .addSelect('u.token_version')
+      .where('u.id = :id', { id: payload.sub })
+      .getOne();
+    if (!user || user.status === UserStatus.BLOCKED || (payload.tv ?? 0) !== user.token_version) {
       throw new UnauthorizedException();
     }
+    delete user.token_version;
     return user;
   }
 }

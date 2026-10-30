@@ -10,6 +10,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { applyBodyLimits } from './body-limits';
+import { corsOptions } from './cors';
 
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, { bodyParser: false });
@@ -26,7 +27,7 @@ async function bootstrap() {
       transform: true,
     }),
   );
-  app.enableCors({ origin: process.env.CORS_ORIGIN || 'http://localhost:3000' });
+  app.enableCors(corsOptions());
 
   const port = process.env.PORT ?? 3001;
   // Loopback by default — only nginx should reach the API; set HOST=0.0.0.0 to expose it.

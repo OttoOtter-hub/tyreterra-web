@@ -1,9 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { JwtService } from '@nestjs/jwt';
 import { ConflictException, ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
+import { SessionsService } from './sessions.service';
 import { User, UserRole, UserStatus } from './entities/user.entity';
 import { PasswordResetToken } from './entities/password-reset-token.entity';
 import { Company } from '../companies/entities/company.entity';
@@ -17,7 +17,8 @@ const mockRepo = () => ({
   save: jest.fn((x) => Promise.resolve({ id: 'uuid-1', ...x })),
 });
 
-const mockJwt = () => ({ sign: jest.fn(() => 'signed-token') });
+const tokens = { access_token: 'signed-token', refresh_token: 'refresh-token' };
+const mockSessions = () => ({ issue: jest.fn(async () => tokens), revokeAll: jest.fn() });
 const mockEmail = () => ({ sendPasswordReset: jest.fn() });
 
 describe('AuthService', () => {
@@ -34,7 +35,7 @@ describe('AuthService', () => {
         { provide: getRepositoryToken(Company), useFactory: mockRepo },
         { provide: getRepositoryToken(AuditLog), useFactory: mockRepo },
         { provide: getRepositoryToken(PasswordResetToken), useFactory: mockRepo },
-        { provide: JwtService, useFactory: mockJwt },
+        { provide: SessionsService, useFactory: mockSessions },
         { provide: EmailService, useFactory: mockEmail },
       ],
     }).compile();
@@ -112,12 +113,12 @@ describe('AuthService', () => {
 
     const loginDto = { email: 'dealer@example.com', password: 'SecurePass123' };
 
-    it('returns access_token for active user with correct password', async () => {
+    it('returns the session tokens for active user with correct password', async () => {
       userRepo.findOneBy.mockResolvedValue(makeUser());
 
       const result = await service.login(loginDto);
 
-      expect(result).toEqual({ access_token: 'signed-token' });
+      expect(result).toEqual(tokens);
       expect(auditRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ event_type: 'user.login' }),
       );

@@ -2,8 +2,6 @@
 import { useRef, useState } from 'react';
 import { api } from '../../lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
-
 // The strict template upload (fixed columns), kept as a fallback next to the smart import
 export default function TemplateImport() {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -27,18 +25,8 @@ export default function TemplateImport() {
   }
 
   function downloadTemplate() {
-    const token = localStorage.getItem('tt_token');
-    if (!token) return;
-    fetch(`${API_BASE}/listings/import/template`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.blob())
-      .then(blob => {
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'tyreterra-import-template.xlsx';
-        link.click();
-        URL.revokeObjectURL(url);
-      });
+    api.download('/listings/import/template', 'tyreterra-import-template.xlsx')
+      .catch(e => setError((e as Error).message));
   }
 
   return (

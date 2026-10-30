@@ -11,7 +11,7 @@
     "api:build": "npm run build --prefix apps/api",
     "web:dev": "npm run dev --prefix apps/web",
     "web:build": "npm run build --prefix apps/web",
-    "test": "npm run test --prefix packages/tire-size && npm run test --prefix apps/api",
+    "test": "npm run test --prefix packages/tire-size && npm run test --prefix apps/web && npm run test --prefix apps/api",
     "test:cov": "npm run test:cov --prefix apps/api",
     "size:build": "npm run build --prefix packages/tire-size"
   },

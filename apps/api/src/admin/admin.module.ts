@@ -7,6 +7,7 @@ import { Company } from '../companies/entities/company.entity';
 import { Listing } from '../listings/entities/listing.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { RatingsModule } from '../ratings/ratings.module';
+import { AuthModule } from '../auth/auth.module';
 import { EmailService } from '../common/email.service';
 import { ListingsExportService } from '../listings/listings-export.service';
 
@@ -14,6 +15,7 @@ import { ListingsExportService } from '../listings/listings-export.service';
   imports: [
     TypeOrmModule.forFeature([User, Company, Listing, AuditLog]),
     RatingsModule,
+    AuthModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, EmailService, ListingsExportService],
