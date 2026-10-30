@@ -2,6 +2,7 @@ import { extname, join } from 'path';
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 import { User } from '../auth/entities/user.entity';
 import { PasswordResetToken } from '../auth/entities/password-reset-token.entity';
+import { RefreshToken } from '../auth/entities/refresh-token.entity';
 import { Company } from '../companies/entities/company.entity';
 import { Listing } from '../listings/entities/listing.entity';
 import { ListingSize } from '../listings/entities/listing-size.entity';
@@ -14,7 +15,7 @@ import { AuditLog } from '../audit/entities/audit-log.entity';
 import { ImportBatch, ImportBatchItem, ImportMapping } from '../listings/import/import.entities';
 
 export const ALL_ENTITIES = [
-  User, Company, Listing, ListingSize, Request, Offer, Deal, Message, Rating, AuditLog, PasswordResetToken,
+  User, Company, Listing, ListingSize, Request, Offer, Deal, Message, Rating, AuditLog, PasswordResetToken, RefreshToken,
   ImportBatch, ImportBatchItem, ImportMapping,
 ];
 

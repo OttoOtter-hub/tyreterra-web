@@ -1,8 +1,9 @@
 'use client';
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '../../contexts/AuthContext';
+import { safeNext } from '../../lib/api';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -11,6 +12,11 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [expired, setExpired] = useState(false);
+
+  useEffect(() => {
+    setExpired(new URLSearchParams(window.location.search).get('reason') === 'expired');
+  }, []);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -18,7 +24,7 @@ export default function LoginPage() {
     setLoading(true);
     try {
       await login(email, password);
-      router.push('/catalogue');
+      router.push(safeNext(new URLSearchParams(window.location.search).get('next')));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -33,6 +39,7 @@ export default function LoginPage() {
           <h1 className="auth-title">Tyre Terra</h1>
           <p className="auth-sub">Sign in to your B2B account</p>
 
+          {expired && !error && <div className="alert alert-info">Session expired</div>}
           {error && <div className="alert alert-error">{error}</div>}
 
           <form onSubmit={handleSubmit}>

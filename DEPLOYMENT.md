@@ -42,9 +42,9 @@ ssh -N -L 3100:127.0.0.1:3100 -L 3101:127.0.0.1:3101 root@<server>
 | `HOST` | no | bind address, default `127.0.0.1`; set `0.0.0.0` only if the API really must be exposed |
 | `DATABASE_URL` | yes* | Neon connection string; takes priority over the discrete `DATABASE_HOST/PORT/USER/PASSWORD/NAME` (+ `DATABASE_SSL`) vars, which remain supported |
 | `JWT_SECRET` | yes | random, e.g. `openssl rand -hex 32` |
-| `JWT_EXPIRES_IN` | no | e.g. `15m` |
+| `JWT_EXPIRES_IN` | no | access token lifetime, default `20m`. Leave it unset unless there is a reason to differ; the refresh token lifetime (14 days) is fixed in code |
 | `ENCRYPTION_KEY` | **yes** | key material for AES-256-GCM encryption of prices and contacts. The API refuses to start without it unless `NODE_ENV` is `development`/`test`. **Back it up outside the server** — if it is lost, existing encrypted data cannot be read |
-| `CORS_ORIGIN` | yes | origin of the web app: `https://<domain>` |
+| `CORS_ORIGIN` | yes | origin of the web app: `https://<domain>`, one exact origin (credentials are on, so `*` does not work) |
 | `FRONTEND_URL` | yes | base URL for password-reset links; same value as `CORS_ORIGIN` |
 
 Enter secrets on the server directly (e.g. `read -rsp` into the file), never through chat, tickets or git.

@@ -11,6 +11,7 @@ import { Listing, ListingStatus } from '../listings/entities/listing.entity';
 import { AuditLog } from '../audit/entities/audit-log.entity';
 import { RatingsService } from '../ratings/ratings.service';
 import { EmailService } from '../common/email.service';
+import { SessionsService } from '../auth/sessions.service';
 import { serializeCompany, PublicCompany } from '../common/serializers';
 import { ApproveUserDto, ApprovalAction } from './dto/approve-user.dto';
 import { AuditLogQueryDto } from './dto/audit-log-query.dto';
@@ -30,6 +31,7 @@ export class AdminService {
     private readonly auditRepo: Repository<AuditLog>,
     private readonly ratingsService: RatingsService,
     private readonly email: EmailService,
+    private readonly sessions: SessionsService,
   ) {}
 
   // ── User approval queue (§10) ────────────────────────────────────────────
@@ -58,6 +60,7 @@ export class AdminService {
     }
 
     const saved = await this.userRepo.save(user);
+    if (user.status === UserStatus.BLOCKED) await this.sessions.revokeAll(userId);
 
     await this.writeAudit(
       dto.action === ApprovalAction.APPROVE ? 'admin.user.approved' : 'admin.user.rejected',
@@ -78,6 +81,7 @@ export class AdminService {
     if (!user) throw new NotFoundException('User not found');
     user.status = UserStatus.BLOCKED;
     const saved = await this.userRepo.save(user);
+    await this.sessions.revokeAll(userId);
     await this.writeAudit('admin.user.blocked', admin.id, userId, {});
     return this.sanitiseUser(saved);
   }

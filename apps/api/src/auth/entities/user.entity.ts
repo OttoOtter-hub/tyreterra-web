@@ -32,6 +32,10 @@ export class User {
   @Column({ name: 'password_hash' })
   password_hash: string;
 
+  // Hidden from every normal load, so it can't reach an API response
+  @Column({ type: 'int', default: 0, name: 'token_version', select: false })
+  token_version?: number;
+
   @Column({ type: 'enum', enum: UserRole, default: UserRole.DEALER })
   role: UserRole;
 

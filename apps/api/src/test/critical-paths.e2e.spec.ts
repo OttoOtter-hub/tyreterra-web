@@ -25,8 +25,15 @@ import { ListingSize } from '../listings/entities/listing-size.entity';
 import { EncryptionService } from '../common/encryption.service';
 import { SECRET_FIELDS } from '../common/serializers';
 import { applyBodyLimits } from '../body-limits';
+import { corsOptions } from '../cors';
 import { ImportBatch } from '../listings/import/import.entities';
+import { SessionsService } from '../auth/sessions.service';
+import { RefreshToken } from '../auth/entities/refresh-token.entity';
+import { PasswordResetToken } from '../auth/entities/password-reset-token.entity';
+import { REFRESH_COOKIE } from '../auth/refresh-cookie';
 import { deflateRawSync } from 'zlib';
+import { Logger } from '@nestjs/common';
+import { createHash } from 'crypto';
 
 // Integration tests against a real, disposable database (e.g. the local
 // docker-compose Postgres), never staging or production. The schema is built
@@ -47,6 +54,7 @@ describe('Critical paths (e2e)', () => {
   let sizeRepo: Repository<ListingSize>;
   let batchRepo: Repository<ImportBatch>;
   let encryption: EncryptionService;
+  let sessions: SessionsService;
 
   const createdUserIds: string[] = [];
   const createdCompanyIds: string[] = [];
@@ -66,6 +74,7 @@ describe('Critical paths (e2e)', () => {
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
     );
+    app.enableCors(corsOptions());
     await app.init();
     httpServer = app.getHttpServer();
 
@@ -76,6 +85,7 @@ describe('Critical paths (e2e)', () => {
     sizeRepo = moduleRef.get(getRepositoryToken(ListingSize));
     batchRepo = moduleRef.get(getRepositoryToken(ImportBatch));
     encryption = moduleRef.get(EncryptionService);
+    sessions = moduleRef.get(SessionsService);
   });
 
   afterAll(async () => {
@@ -1257,18 +1267,210 @@ describe('Critical paths (e2e)', () => {
         ...(await ds.query('SELECT size_width FROM listing_sizes WHERE listing_id = $1 ORDER BY position', [l.id])),
       ].map((r: { size_width: string }) => Number(r.size_width));
 
+      await ds.undoLastMigration(); // 0013 down: it sits on top of 0012
       await ds.undoLastMigration(); // 0012 down: widths as written
       expect(await widths()).toEqual([1400, 1400, 1400]);
-      await ds.runMigrations(); // 0012 up
+      await ds.runMigrations(); // 0012 and 0013 up
       expect(await widths()).toEqual([14, 14, 14]);
     });
   });
 
-  // ── 12. Rate limiting ─────────────────────────────────────────────────────
-  // Runs last and in isolation: every prior test in this file authenticates
-  // via signed JWTs (see makeActiveUser), never via POST /auth/login, so
-  // nothing here has already spent part of the per-IP login quota.
+  // ── 12. Session refresh ───────────────────────────────────────────────────
+  // Sessions start through SessionsService.issue, not /auth/login, which keeps
+  // the login quota for the rate limit test below (one real login here).
+  describe('Session refresh', () => {
+    const hash = (t: string) => createHash('sha256').update(t).digest('hex');
+    const tokenRepo = () => app.get(DataSource).getRepository(RefreshToken);
+
+    const refresh = (token: string) =>
+      request(httpServer).post('/api/auth/refresh').set('Cookie', `${REFRESH_COOKIE}=${token}`);
+    const me = (access: string) =>
+      request(httpServer).get('/api/auth/me').set('Authorization', `Bearer ${access}`);
+    const newCookie = (res: request.Response): string =>
+      [res.headers['set-cookie']].flat().join(';').match(new RegExp(`${REFRESH_COOKIE}=([0-9a-f]+)`))?.[1] ?? '';
+
+    it('login sets the cookie and keeps the refresh token out of the body', async () => {
+      const { user } = await makeActiveUser();
+
+      const res = await request(httpServer)
+        .post('/api/auth/login')
+        .send({ email: user.email, password: 'TestPass123!' })
+        .expect(201);
+
+      expect(Object.keys(res.body)).toEqual(['access_token']);
+      const cookie = [res.headers['set-cookie']].flat()[0];
+      expect(cookie).toContain('HttpOnly');
+      expect(cookie).toContain('SameSite=Lax');
+      expect(cookie).toContain('Path=/api/auth/refresh');
+      expect(cookie).toContain(`Max-Age=${14 * 24 * 60 * 60}`);
+      expect(cookie).not.toContain('Secure'); // NODE_ENV is not production here
+
+      const raw = newCookie(res);
+      const rows = await tokenRepo().findBy({ user_id: user.id });
+      expect(rows.map(r => r.token_hash)).toEqual([hash(raw)]);
+    });
+
+    it('issues a 20-minute access token', async () => {
+      const { user } = await makeActiveUser();
+      const { access_token } = await sessions.issue(user.id);
+      const { iat, exp } = jwt.decode(access_token) as { iat: number; exp: number };
+      expect(exp - iat).toBe(20 * 60);
+    });
+
+    it('allows the credentials the local web app needs', async () => {
+      const res = await request(httpServer)
+        .options('/api/auth/refresh')
+        .set('Origin', 'http://localhost:3000')
+        .set('Access-Control-Request-Method', 'POST');
+      expect(res.headers['access-control-allow-credentials']).toBe('true');
+      expect(res.headers['access-control-allow-origin']).toBe('http://localhost:3000');
+    });
+
+    it('exchanges a refresh token for a new pair', async () => {
+      const { user } = await makeActiveUser();
+      const first = await sessions.issue(user.id);
+
+      const res = await refresh(first.refresh_token).expect(200);
+
+      expect(Object.keys(res.body)).toEqual(['access_token']);
+      expect(newCookie(res)).toMatch(/^[0-9a-f]{64}$/);
+      expect(newCookie(res)).not.toBe(first.refresh_token);
+      await me(res.body.access_token).expect(200);
+      const used = await tokenRepo().findOneByOrFail({ token_hash: hash(first.refresh_token) });
+      expect(used.used_at).not.toBeNull();
+    });
+
+    it('rejects a missing, unknown or expired refresh token', async () => {
+      const { user } = await makeActiveUser();
+      const { refresh_token } = await sessions.issue(user.id);
+      await tokenRepo().update({ token_hash: hash(refresh_token) }, { expires_at: new Date(Date.now() - 1000) });
+
+      await request(httpServer).post('/api/auth/refresh').expect(401);
+      await refresh('0'.repeat(64)).expect(401);
+      const res = await refresh(refresh_token).expect(401);
+      expect([res.headers['set-cookie']].flat()[0]).toContain(`${REFRESH_COOKIE}=;`);
+    });
+
+    it('on reuse rejects the token and signs the user out everywhere', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn');
+      const { user } = await makeActiveUser();
+      const otherDevice = await sessions.issue(user.id);
+      const stolen = await sessions.issue(user.id);
+      const rotated = await refresh(stolen.refresh_token).expect(200);
+
+      await refresh(stolen.refresh_token).expect(401);
+
+      await refresh(newCookie(rotated)).expect(401);
+      await refresh(otherDevice.refresh_token).expect(401);
+      await me(rotated.body.access_token).expect(401);
+      const logged = warn.mock.calls.flat().join(' ');
+      warn.mockRestore();
+      expect(logged).toContain(user.id);
+      expect(logged).not.toContain(stolen.refresh_token);
+    });
+
+    it('lets only one of two simultaneous uses of a token through, then revokes', async () => {
+      const { user } = await makeActiveUser();
+      const { refresh_token } = await sessions.issue(user.id);
+
+      const results = await Promise.all([refresh(refresh_token), refresh(refresh_token)]);
+
+      expect(results.map(r => r.status).sort()).toEqual([200, 401]);
+      const winner = results.find(r => r.status === 200)!;
+      await refresh(newCookie(winner)).expect(401);
+    });
+
+    it('logout revokes this session only, without an access token', async () => {
+      const { user } = await makeActiveUser();
+      const laptop = await sessions.issue(user.id);
+      const phone = await sessions.issue(user.id);
+
+      const res = await request(httpServer)
+        .post('/api/auth/refresh/logout')
+        .set('Cookie', `${REFRESH_COOKIE}=${laptop.refresh_token}`)
+        .expect(204);
+
+      expect([res.headers['set-cookie']].flat()[0]).toContain(`${REFRESH_COOKIE}=;`);
+      await refresh(laptop.refresh_token).expect(401);
+      await refresh(phone.refresh_token).expect(200);
+    });
+
+    it('after a password change the old session is dead and the new one works', async () => {
+      const { user } = await makeActiveUser();
+      const old = await sessions.issue(user.id);
+      const change = (current_password: string) =>
+        request(httpServer)
+          .post('/api/auth/change-password')
+          .set('Authorization', `Bearer ${old.access_token}`)
+          .send({ current_password, new_password: 'NewPassword12345' });
+
+      await change('WrongPassword1').expect(400);
+      await me(old.access_token).expect(200);
+
+      const res = await change('TestPass123!').expect(201);
+
+      await me(old.access_token).expect(401);
+      await refresh(old.refresh_token).expect(401);
+      await me(res.body.access_token).expect(200);
+      await refresh(newCookie(res)).expect(200);
+    });
+
+    it('a password reset ends the sessions', async () => {
+      const { user } = await makeActiveUser();
+      const old = await sessions.issue(user.id);
+      const token = 'a'.repeat(64);
+      await app.get(DataSource).getRepository(PasswordResetToken).save({
+        user_id: user.id, token_hash: hash(token), expires_at: new Date(Date.now() + 60_000),
+      });
+
+      await request(httpServer)
+        .post('/api/auth/reset-password')
+        .send({ token, new_password: 'NewPassword12345' })
+        .expect(201);
+
+      await me(old.access_token).expect(401);
+      await refresh(old.refresh_token).expect(401);
+    });
+
+    it('blocking ends the sessions, and unblocking does not bring them back', async () => {
+      const { token: adminToken } = await makeActiveUser({ role: UserRole.ADMIN });
+      const { user } = await makeActiveUser();
+      const old = await sessions.issue(user.id);
+      const admin = (action: string) =>
+        request(httpServer).post(`/api/admin/users/${user.id}/${action}`).set('Authorization', `Bearer ${adminToken}`);
+
+      await admin('block').expect(201);
+      await refresh(old.refresh_token).expect(401);
+
+      await admin('unblock').expect(201);
+      await refresh(old.refresh_token).expect(401);
+      await me(old.access_token).expect(401);
+    });
+
+    it('accepts an access token issued before this change', async () => {
+      const { token } = await makeActiveUser(); // signed without tv
+      await me(token).expect(200);
+    });
+
+    it('never shows token_version in a response', async () => {
+      const { token } = await makeActiveUser();
+      const res = await me(token).expect(200);
+      expect(res.body).not.toHaveProperty('token_version');
+    });
+  });
+
+  // ── 13. Rate limiting ─────────────────────────────────────────────────────
+  // Runs last: only section 3 and the one login in section 12 touch POST
+  // /auth/login, the rest authenticate via signed JWTs (see makeActiveUser).
   describe('Rate limiting', () => {
+    it('returns 429 after exceeding the refresh threshold (30 / 5 min)', async () => {
+      let last: request.Response | undefined;
+      for (let i = 0; i < 31; i++) {
+        last = await request(httpServer).post('/api/auth/refresh');
+      }
+      expect(last!.status).toBe(429);
+    });
+
     it('returns 429 after exceeding the login attempt threshold (5 / 15 min)', async () => {
       const email = `ratelimit-${randomUUID()}@example.com`;
       let last: request.Response | undefined;

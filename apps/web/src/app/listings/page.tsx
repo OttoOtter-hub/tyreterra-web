@@ -5,8 +5,6 @@ import Navbar from '../../components/Navbar';
 import { api } from '../../lib/api';
 import { countryByCode } from '../../lib/countries';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001/api';
-
 const SEGMENTS = ['TBR', 'PCR', 'OTR', 'AGRI', 'MH'];
 const CONDITIONS = ['new', 'used', 'retreaded'];
 const STATUSES = ['active', 'inactive', 'expired'];
@@ -111,13 +109,7 @@ export default function MyListingsPage() {
   }
 
   function exportExcel() {
-    const token = localStorage.getItem('tt_token');
-    fetch(`${API_BASE}/listings/export`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.blob()).then(blob => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = 'my-listings.xlsx'; a.click();
-        URL.revokeObjectURL(url);
-      });
+    api.download('/listings/export', 'my-listings.xlsx').catch(() => {});
   }
 
   return (

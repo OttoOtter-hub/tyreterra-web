@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, IsNull, MoreThan } from 'typeorm';
-import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes, createHash } from 'crypto';
 import { User, UserStatus } from './entities/user.entity';
@@ -20,7 +19,8 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
-import { JwtPayload } from './strategies/jwt.strategy';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { SessionsService, SessionTokens } from './sessions.service';
 
 const RESET_TOKEN_TTL_MS = 60 * 60_000; // 1 hour
 
@@ -35,7 +35,7 @@ export class AuthService {
     private readonly auditRepo: Repository<AuditLog>,
     @InjectRepository(PasswordResetToken)
     private readonly resetTokenRepo: Repository<PasswordResetToken>,
-    private readonly jwtService: JwtService,
+    private readonly sessions: SessionsService,
     private readonly email: EmailService,
   ) {}
 
@@ -82,7 +82,7 @@ export class AuthService {
     return { message: 'Registration successful. Your account is pending admin approval.' };
   }
 
-  async login(dto: LoginDto): Promise<{ access_token: string }> {
+  async login(dto: LoginDto): Promise<SessionTokens> {
     const user = await this.userRepo.findOneBy({ email: dto.email });
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
@@ -110,8 +110,35 @@ export class AuthService {
       }),
     );
 
-    const payload: JwtPayload = { sub: user.id, email: user.email, role: user.role };
-    return { access_token: this.jwtService.sign(payload) };
+    return this.sessions.issue(user.id);
+  }
+
+  // Ends every session of the user and starts a new one for the caller.
+  // A wrong password is 400, not 401: the web app reads 401 as an expired session.
+  async changePassword(userId: string, dto: ChangePasswordDto): Promise<SessionTokens> {
+    const user = await this.userRepo.findOneBy({ id: userId });
+    if (!user) throw new UnauthorizedException();
+
+    const passwordValid = await bcrypt.compare(dto.current_password, user.password_hash);
+    if (!passwordValid) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    user.password_hash = await bcrypt.hash(dto.new_password, 12);
+    await this.userRepo.save(user);
+    await this.sessions.revokeAll(user.id);
+
+    await this.auditRepo.save(
+      this.auditRepo.create({
+        event_type: 'user.password_changed',
+        actor_id: user.id,
+        target_id: user.id,
+        target_type: 'user',
+        payload: {},
+      }),
+    );
+
+    return this.sessions.issue(user.id);
   }
 
   async getProfile(userId: string): Promise<Omit<User, 'password_hash' | 'company'> & { company: PublicCompany | null }> {
@@ -187,6 +214,8 @@ export class AuthService {
       .where('user_id = :userId', { userId: user.id })
       .andWhere('used_at IS NULL')
       .execute();
+
+    await this.sessions.revokeAll(user.id);
 
     await this.auditRepo.save(
       this.auditRepo.create({
